@@ -11,6 +11,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Get the files to be worked on
     Files_t* files = getAllFilesNames(argv[1]);
     if (files == NULL) {
         return EXIT_FAILURE;
@@ -27,13 +28,7 @@ int main(int argc, char *argv[]) {
     }
     if (exit) return EXIT_FAILURE;
 
-    for (size_t index = 0; index < files->numberOfFiles; ++index) {
-        printf("%s\n", files->filesNamesToSearch[index]);
-    }
-
-    printf("%s\n", files->wordsFilename);
-    printf("%zd, %zd\n", files->numberOfFiles, files->allocatedSize);
-
+    // Dynamically Allocated Array
     wipe(files);
 
     return EXIT_SUCCESS;
