@@ -1,6 +1,8 @@
 #include <stdio.h>
 
-#include "FilesToSearch.h"
+#include "Files.h"
+
+#include <stdbool.h>
 
 int main(int argc, char *argv[]) {
 
@@ -9,17 +11,30 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    FilesToSearch_t* filesToSearch = getAllFilesNames(argv[1]);
-    if (filesToSearch == NULL) return EXIT_FAILURE;
-
-    for (size_t index = 0; index < filesToSearch->numberOfFiles; ++index) {
-        printf("%s\n", filesToSearch->filesNames[index]);
+    Files_t* files = getAllFilesNames(argv[1]);
+    if (files == NULL) {
+        return EXIT_FAILURE;
     }
 
-    printf("%zd, %zd\n", filesToSearch->numberOfFiles, filesToSearch->allocatedSize);
+    bool exit = false;
+    if (files->numberOfFiles == 0) {
+        fprintf(stderr, "You must create files to be indexed\n");
+        exit = true;
+    }
+    if (files->wordsFilename == NULL) {
+        fprintf(stderr, "You must create the %s file\n", defaultWordsFileName);
+        exit = true;
+    }
+    if (exit) return EXIT_FAILURE;
 
-    // free mallocs
-    wipe(filesToSearch);
+    for (size_t index = 0; index < files->numberOfFiles; ++index) {
+        printf("%s\n", files->filesNamesToSearch[index]);
+    }
+
+    printf("%s\n", files->wordsFilename);
+    printf("%zd, %zd\n", files->numberOfFiles, files->allocatedSize);
+
+    wipe(files);
 
     return EXIT_SUCCESS;
 }

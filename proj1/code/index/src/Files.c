@@ -1,4 +1,4 @@
-#include "FilesToSearch.h"
+#include "Files.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -8,21 +8,22 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
+#include <strings.h>
 
 #define DEFAULT_CHAR_ARRAY_SIZE 10
 #define INCREMENTOR_CHAR_ARRAY_SIZE 5
 
-static FilesToSearch_t* FilesToSearch(void);
-static FilesToSearch_t* addFileName(FilesToSearch_t * const ptr, char const * const fileName);
-static FilesToSearch_t* normalizeFilesNames(FilesToSearch_t * const ptr);
+static Files_t* Files(void);
+static Files_t* addFileName(Files_t * const ptr, char const * const fileName);
+static Files_t* normalizeFilesNames(Files_t * const ptr);
 
-FilesToSearch_t* getAllFilesNames(char const * const path) {
+Files_t* getAllFilesNames(char const * const path) {
     if (path == NULL) {
         errno = EINVAL;
         return NULL;
     }
 
-    FilesToSearch_t *filesToSearch = FilesToSearch();
+    Files_t *filesToSearch = Files();
 
     DIR *directoryPtr;
     struct dirent *direntPtr;
@@ -57,65 +58,71 @@ FilesToSearch_t* getAllFilesNames(char const * const path) {
     return filesToSearch;
 }
 
-void wipe(FilesToSearch_t * const ptr) {
+void wipe(Files_t * const ptr) {
     if (ptr == NULL) {
         return;
     }
 
-    if (ptr->filesNames == NULL) {
+    if (ptr->filesNamesToSearch == NULL) {
         free(ptr);
         return;
     }
 
-    free(ptr->filesNames);
+    free(ptr->filesNamesToSearch);
     free(ptr);
 }
 
-static FilesToSearch_t* FilesToSearch(void) {
+static Files_t* Files(void) {
 
-    FilesToSearch_t *files = (FilesToSearch_t *) malloc(sizeof(FilesToSearch_t));
+    Files_t *files = (Files_t *) malloc(sizeof(Files_t));
     if (files == NULL) {
-        perror("There was an error creating the struct FilesToSearch");
+        perror("There was an error creating the struct Files");
         return NULL;
     }
 
-    files->filesNames = (const char **) malloc(sizeof(char *) * DEFAULT_CHAR_ARRAY_SIZE);
-    if (files->filesNames == NULL) {
+    files->filesNamesToSearch = (const char **) malloc(sizeof(char *) * DEFAULT_CHAR_ARRAY_SIZE);
+    if (files->filesNamesToSearch == NULL) {
         free(files);
         perror("There was an error creating the array of file descriptors");
         return NULL;
     }
     files->allocatedSize = DEFAULT_CHAR_ARRAY_SIZE;
     files->numberOfFiles = 0;
+    files->wordsFilename = NULL;
 
     return files;
 }
 
-static FilesToSearch_t* addFileName(FilesToSearch_t * const ptr, char const * const fileName) {
+static Files_t* addFileName(Files_t * const ptr, char const * const fileName) {
     if (ptr == NULL || ptr->allocatedSize == 0 || fileName == NULL || ptr->numberOfFiles > ptr->allocatedSize) {
         errno = EINVAL;
         return NULL;
     }
 
+    if (strcasecmp(fileName, wordsFileName) == 0) {
+        ptr->wordsFilename = wordsFileName;
+        return ptr;
+    }
+
     char const **tempPtr;
     if (ptr->numberOfFiles < ptr->allocatedSize) {
-        ptr->filesNames[ptr->numberOfFiles] = fileName;
+        ptr->filesNamesToSearch[ptr->numberOfFiles] = fileName;
         ++ptr->numberOfFiles;
     } else if (ptr->numberOfFiles == ptr->allocatedSize) {
-        tempPtr = (const char **) realloc(ptr->filesNames, (INCREMENTOR_CHAR_ARRAY_SIZE + ptr->allocatedSize) * sizeof(char *));
+        tempPtr = (const char **) realloc(ptr->filesNamesToSearch, (INCREMENTOR_CHAR_ARRAY_SIZE + ptr->allocatedSize) * sizeof(char *));
         if (tempPtr == NULL) {
             perror("There was an error extending the array of file descriptors");
             return NULL;
         }
-        ptr->filesNames = tempPtr;
+        ptr->filesNamesToSearch = tempPtr;
         ptr->allocatedSize += INCREMENTOR_CHAR_ARRAY_SIZE;
-        ptr->filesNames[ptr->numberOfFiles] = fileName;
+        ptr->filesNamesToSearch[ptr->numberOfFiles] = fileName;
         ++ptr->numberOfFiles;
     }
     return ptr;
 }
 
-static FilesToSearch_t* normalizeFilesNames(FilesToSearch_t * const ptr) {
+static Files_t* normalizeFilesNames(Files_t * const ptr) {
     if (ptr == NULL || ptr->numberOfFiles > ptr->allocatedSize) {
         errno = EINVAL;
         return NULL;
@@ -125,20 +132,20 @@ static FilesToSearch_t* normalizeFilesNames(FilesToSearch_t * const ptr) {
 
     if (ptr->numberOfFiles == 0) {
         ptr->allocatedSize = 0;
-        free(ptr->filesNames);
-        ptr->filesNames = NULL;
+        free(ptr->filesNamesToSearch);
+        ptr->filesNamesToSearch = NULL;
         return ptr;
     }
 
     char const **tempPtr;
     if (ptr->numberOfFiles < ptr->allocatedSize) {
-        tempPtr = (const char **) realloc(ptr->filesNames, sizeof(char *) * ptr->numberOfFiles);
+        tempPtr = (const char **) realloc(ptr->filesNamesToSearch, sizeof(char *) * ptr->numberOfFiles);
         if (tempPtr == NULL) {
             perror("There was an error normalizing the array of file descriptors");
             return NULL;
         }
         ptr->allocatedSize = ptr->numberOfFiles;
-        ptr->filesNames = tempPtr;
+        ptr->filesNamesToSearch = tempPtr;
     }
 
     return ptr;
