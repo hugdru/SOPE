@@ -2,9 +2,9 @@
 
 SRC = $(wildcard src/*.c)
 
-OBJ = $(patsubst src/%.c, ../buildtemp/%.o, $(SRC))
+OBJ = $(patsubst src/%.c, buildtemp/%.o, $(SRC))
 
-OUT = bin/index
+OUT = ../../bin/sw
 
 # compiler
 CC = gcc
@@ -23,12 +23,12 @@ default: $(OUT)
 debug: CFLAGS = -std=c11 -ggdb -g3 -Wall -Wextra -pedantic -Wshadow -Wfloat-equal -Wcast-align -Wcast-qual -Wwrite-strings -Wconversion -Wsign-conversion -Wlogical-op -Wmissing-declarations -Wredundant-decls -Wdisabled-optimization -Winline -Wswitch-default -Wswitch-enum -Wnested-externs -Wstrict-prototypes -Wold-style-definition -Wmissing-prototypes -Wformat=2 -Wpadded -Wimplicit -Wmissing-include-dirs -Wbad-function-cast -Wc++-compat -Wcast-qual -Wcast-align -Wpacked -Wvector-operation-performance -Wdouble-promotion
 debug: $(OUT)
 
-../buildtemp/%.o: src/%.c
-	mkdir -p ../buildtemp
+buildtemp/%.o: src/%.c
+	mkdir -p buildtemp
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OUT): $(OBJ)
-	mkdir -p bin
+	mkdir -p ../../bin
 	$(CC) $(CFLAGS) $(OBJ) -o $(OUT)
 
 clean:
