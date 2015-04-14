@@ -6,12 +6,13 @@
 #include <stdlib.h>
 
 typedef struct FilesToSearch {
-    ssize_t *filesDescriptors;
+    char const **filesNames;
     size_t numberOfFiles;
     size_t allocatedSize;
 } FilesToSearch_t;
 
-FilesToSearch_t* getAllTextFiles(char const * const path);
+FilesToSearch_t* getAllFilesNames(char const * const path);
+void wipe(FilesToSearch_t * const ptr);
 
 #endif
 
