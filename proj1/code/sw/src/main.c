@@ -12,10 +12,10 @@
 
 #define wordsFileNameIndex 1
 #define searchFileName 2
+#define PIPEREAD 0
+#define PIPEWRITE 1
 
 #define CHAR_BUFFER_SIZE 128
-
-extern char **environ;
 
 int main(int argc, char *argv[]) {
 
@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
 
     FILE *wordsStream;
     if ((wordsStream = fopen(argv[wordsFileNameIndex], "r")) == NULL) {
-        perror("Failed to open the file");
+        perror("Can't find the file with the words");
         return EXIT_FAILURE;
     }
 
@@ -42,23 +42,70 @@ int main(int argc, char *argv[]) {
     char *linePtr = (char *) malloc(sizeof(char) * CHAR_BUFFER_SIZE);
     ssize_t bytesRead;
 
+    // sw    grep ->[]- sed ->[]--(stdout)
     while ((bytesRead = getline(&linePtr, &n, wordsStream)) > 0) {
 
         if (linePtr[bytesRead - 1] == '\n') linePtr[bytesRead - 1] = '\0';
 
-        pid_t pid = fork();
+        /** GREP SECTION **/
+        int pipeGrepSed[2];
+        if (pipe(pipeGrepSed) < 0) {
+            perror("Could not create a pipe cut -> sw");
+            exit(EXIT_FAILURE);
+        }
 
-        switch (pid) {
+        pid_t pidForkGrep = fork();
+        if (pidForkGrep < 0) {
+            perror("Failed to create a grep child process");
+            exit(EXIT_FAILURE);
+        }
+
+        switch (pidForkGrep) {
             case -1:
-                perror("Failed to fork");
-                return EXIT_FAILURE;
+                perror("Failed to fork cut");
+                exit(EXIT_FAILURE);
+                break;
             case 0:
+                close(pipeGrepSed[PIPEREAD]);
+                dup2(pipeGrepSed[PIPEWRITE], STDOUT_FILENO);
                 execlp("grep", "grep", linePtr, "-n", argv[searchFileName], NULL);
-                fprintf(stderr, "failed to exec\n");
-                return EXIT_FAILURE;
+                fprintf(stderr, "failed to exec grep\n");
+                exit(EXIT_FAILURE);
+                break;
             default:
+                // I can't close the pipeGrepCut[PIPEREAD] because the OS will see that there are
+                // no processes conected to the read end and will generate a SIGPIPE signal
+                close(pipeGrepSed[PIPEWRITE]);
                 break;
         }
+        /** END OF GREP SECTION **/
+        /** START OF CUT SECTION **/
+
+        pid_t pidForkSed = fork();
+        if (pidForkSed < 0) {
+            perror("Failed to create a cut child process");
+            exit(EXIT_FAILURE);
+        }
+
+        switch (pidForkSed) {
+            case -1:
+                perror("Failed to fork grep");
+                exit(EXIT_FAILURE);
+                break;
+            case 0:
+                dup2(pipeGrepSed[PIPEREAD], STDIN_FILENO);
+                // Do the sed magic
+
+                execlp("sed", "sed", "-r", "-d:", NULL);
+                fprintf(stderr, "failed to exec cut\n");
+                exit(EXIT_FAILURE);
+                break;
+            default:
+                close(pipeGrepSed[PIPEREAD]);
+                break;
+        }
+        break;
+
     }
 
     free(linePtr);

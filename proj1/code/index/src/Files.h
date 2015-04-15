@@ -1,5 +1,5 @@
-#ifndef FILES_TO_SEARCH_H
-#define FILES_TO_SEARCH_H
+#ifndef FILES_TO_SEARCH_H_
+#define FILES_TO_SEARCH_H_
 
 #define _XOPEN_SOURCE 700
 
