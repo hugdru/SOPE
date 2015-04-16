@@ -7,10 +7,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <ftw.h>
+#include <errno.h>
 
 #include "Files.h"
 
-#define DEFAULTBUFFERSIZE 128
 #define DIRPATHINDEX 1
 #define PIPEREAD 0
 #define PIPEWRITE 1
@@ -19,12 +21,14 @@ long nChildProcesses = 0;
 
 const char defaultWordsFileName[] = "words.txt";
 
-#define TEMPFILENUMBERSLEN 20
-const char tempFilesDir[] = "/tmp/indexTemp/";
-const size_t defaultTempFilesPathSize = (sizeof(tempFilesDir) / sizeof(tempFilesDir[0])) + TEMPFILENUMBERSLEN;
-unsigned long int tempFileName = 0;
+const char tempFilePathDir[] = "/tmp/index";
+// "/tmp/index-pid/fileName"
+const size_t tempFilePathDirBufSize = (sizeof(tempFilePathDir) / sizeof(tempFilePathDir[0])) + (1 + 7 + 1) * sizeof(char);
+const size_t tempFilePathBufSize = (sizeof(tempFilePathDir) / sizeof(tempFilePathDir[0])) + (1 + 7 + 1 + NAME_MAX) * sizeof(char);
 
 void childHandler(int signo);
+void removeTempDir(char *dirPath);
+int ftwHandler(const char *fpath, const struct stat *sb, int typeflag);
 
 int main(int argc, char *argv[]) {
 
@@ -57,6 +61,7 @@ int main(int argc, char *argv[]) {
     // Because we don't use them and with don't want zombies
     struct sigaction sigact;
     sigact.sa_handler = childHandler;
+    sigemptyset(&sigact.sa_mask);
     // Do not receive job control notification from child
     sigact.sa_flags = SA_NOCLDSTOP;
     if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
@@ -70,6 +75,20 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     /** END OF INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
+    char *tempFilePath = (char *) malloc(tempFilePathDirBufSize * sizeof(char));
+    int tempFilePathLen = snprintf(tempFilePath, tempFilePathDirBufSize, "%s-%d/", tempFilePathDir, getpid());
+    if (tempFilePathLen < 0) {
+        perror("Failed to create string temp file path dir");
+        exit(EXIT_FAILURE);
+    }
+
+    if (mkdir(tempFilePath, 0770) == -1) {
+        perror("Failed to create temp file folder");
+        if (errno == EEXIST) {
+            fprintf(stderr, "Remove the %s directory manually\n", tempFilePath);
+        }
+        exit(EXIT_FAILURE);
+    }
 
     for (size_t index = 0; index < files->numberOfFiles; ++index) {
 
@@ -87,34 +106,58 @@ int main(int argc, char *argv[]) {
                 }
             case 0:
                 {
-                    // Append number to string
-                    /*int newFileDescriptor;*/
+                    tempFilePath = (char *) realloc(tempFilePath, tempFilePathBufSize);
+                    if (tempFilePath == NULL) {
+                        perror("Failed to allocate space for a temp file path");
+                        exit(EXIT_FAILURE);
+                    }
+                    snprintf(
+                            &tempFilePath[tempFilePathLen], NAME_MAX,
+                            "%s",
+                            files->filesNamesToSearch[index]
+                            );
 
-                    /*char **newFilePathBuffer = NULL;*/
-                    /*int newFilePathSize =*/
-                    /*if (mycatsi(&newFilePathBuffer, &newFilePathSize, ptr1, tempFileName) == -1) {*/
-                    /*perror("Failed to append int to string");*/
-                    /*exit(EXIT_FAILURE);*/
-                    /*}*/
-                    /*if ((newFileDescriptor = open(*/
-                    /*if (dup2(newFileDescriptor, STDOUT_FILENO) == -1) {*/
-                    /*perror("Failed to redirect stdout in child");*/
-                    /*exit(EXIT_FAILURE);*/
-                    /*}*/
+
+                    int newTempFileDescriptor;
+                    if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
+                        perror("There was an error creating a temporary file");
+                        exit(EXIT_FAILURE);
+                    }
+                    if (dup2(newTempFileDescriptor, STDOUT_FILENO) == -1) {
+                        perror("Failed to redirect child stdout");
+                        exit(EXIT_FAILURE);
+                    }
 
                     execl("../sw", "sw", defaultWordsFileName, files->filesNamesToSearch[index], NULL);
+                    free(tempFilePath);
                     fprintf(stderr, "failed to exec sw\n");
                     exit(EXIT_FAILURE);
                     break;
                 }
             default:
-                /*++tempFileName;*/
                 break;
         }
     }
+    // Wait for all children to finish
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_handler = SIG_DFL;
+    sigact.sa_flags = 0;
+    if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
+        perror("There was an error setting the default SIGCHLD handler");
+        exit(EXIT_FAILURE);
+    }
 
-    // Dynamically Allocated Array
+    do {
+        if (wait(NULL) == -1) {
+            if (errno == ECHILD) break;
+        }
+    } while (true);
+
+    // Cleansing
     wipe(files);
+    removeTempDir(tempFilePath);
+    free(tempFilePath);
+
 
     return EXIT_SUCCESS;
 }
@@ -133,5 +176,31 @@ void childHandler(__attribute__((unused)) int signo) {
             exit(EXIT_FAILURE);
         }
     }
+}
+
+void removeTempDir(char *dirPath) {
+    if (dirPath == NULL) {
+        return;
+    }
+    if (ftw(dirPath, ftwHandler, 5) == -1) {
+        perror("Failed to clean files inside file temp dir");
+        exit(EXIT_FAILURE);
+    }
+
+    if (rmdir(dirPath) == -1) {
+        perror("Can't delete the file temp dir");
+        exit(EXIT_FAILURE);
+    }
+}
+
+int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, int typeflag) {
+    if (typeflag == FTW_F) {
+        if (unlink(fpath) == -1) {
+            perror("Failed to delete a file inside the file temp dir");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    return 0;
 }
 
