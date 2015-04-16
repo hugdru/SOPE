@@ -4,17 +4,20 @@
 #define _XOPEN_SOURCE 700
 
 #include <stdlib.h>
+#include <stdint.h>
 
-const char defaultWordsFileName[] = "words.txt";
+#define true 1
+#define false 0
 
 typedef struct Files {
-    char const *wordsFilename;
     char const **filesNamesToSearch;
+    char const *wordsFileName;
     size_t numberOfFiles;
     size_t allocatedSize;
+    size_t foundDefaultWordsFileName;
 } Files_t;
 
-Files_t* getAllFilesNames(char const * const path);
+Files_t* getAllFilesNames(char const * const path, char const * const defaultWordsFileName);
 void wipe(Files_t * const ptr);
 
 #endif

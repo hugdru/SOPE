@@ -13,29 +13,28 @@
 #define DEFAULT_CHAR_ARRAY_SIZE 10
 #define INCREMENTOR_CHAR_ARRAY_SIZE 5
 
-static Files_t* Files(void);
+static Files_t* Files(char const * const defaultWordsFileName);
 static Files_t* addFileName(Files_t * const ptr, char const * const fileName);
 static Files_t* normalizeFilesNames(Files_t * const ptr);
 
-Files_t* getAllFilesNames(char const * const path) {
-    if (path == NULL) {
+Files_t* getAllFilesNames(char const * const dirPath, char const * const defaultWordsFileName) {
+    if (dirPath == NULL || defaultWordsFileName == NULL) {
         errno = EINVAL;
         return NULL;
     }
 
-    Files_t *filesToSearch = Files();
+    Files_t *filesToSearch = Files(defaultWordsFileName);
 
     DIR *directoryPtr;
     struct dirent *direntPtr;
     struct stat stat_buf;
 
-    printf("Opening the %s directory\n", path);
-    if ((directoryPtr = opendir(path)) == NULL) {
+    if ((directoryPtr = opendir(dirPath)) == NULL) {
         perror("There was an error opening the directory");
         exit(EXIT_FAILURE);
     }
 
-    if (chdir(path) != 0) {
+    if (chdir(dirPath) != 0) {
         perror("Failed to change that folder");
         exit(EXIT_FAILURE);
     }
@@ -72,7 +71,7 @@ void wipe(Files_t * const ptr) {
     free(ptr);
 }
 
-static Files_t* Files(void) {
+static Files_t* Files(char const * const defaultWordsFileName) {
 
     Files_t *files = (Files_t *) malloc(sizeof(Files_t));
     if (files == NULL) {
@@ -88,7 +87,8 @@ static Files_t* Files(void) {
     }
     files->allocatedSize = DEFAULT_CHAR_ARRAY_SIZE;
     files->numberOfFiles = 0;
-    files->wordsFilename = NULL;
+    files->foundDefaultWordsFileName = false;
+    files->wordsFileName = defaultWordsFileName;
 
     return files;
 }
@@ -99,9 +99,11 @@ static Files_t* addFileName(Files_t * const ptr, char const * const fileName) {
         return NULL;
     }
 
-    if (strcasecmp(fileName, wordsFileName) == 0) {
-        ptr->wordsFilename = wordsFileName;
-        return ptr;
+    if (!ptr->foundDefaultWordsFileName) {
+        if (strcasecmp(fileName, ptr->wordsFileName) == 0) {
+            ptr->foundDefaultWordsFileName = true;
+            return ptr;
+        }
     }
 
     char const **tempPtr;
