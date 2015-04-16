@@ -11,7 +11,7 @@
 
 typedef struct Files {
     char const **filesNamesToSearch;
-    char *wordsFileName;
+    char const *wordsFileName;
     size_t numberOfFiles;
     size_t allocatedSize;
     size_t foundDefaultWordsFileName;

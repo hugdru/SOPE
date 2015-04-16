@@ -13,7 +13,7 @@ CC = gcc
 
 all: default
 
-release: CFLAGS = -std=c11 -O2 -march=native -pipe -fstack-protector-all -Wstack-protector --param ssp-buffer-size=4 -pie -fPIE -ftrapv -­D_FORTIFY_SOURCE=2 -Wl,-z,relro,-z,now
+release: CFLAGS = -std=c11 -O2 -march=native -pipe -fstack-protector-all -Wstack-protector --param ssp-buffer-size=4 -pie -fPIE -ftrapv -D_FORTIFY_SOURCE=2 -Wl,-z,relro,-z,now
 release: $(OUT)
 
 #default: CFLAGS = -std=c11 -O2 -march=native -pipe
