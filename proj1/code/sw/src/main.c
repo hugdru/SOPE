@@ -50,10 +50,6 @@ int main(int argc, char *argv[]) {
     }
 
     pid_t pidForkGrep = fork();
-    if (pidForkGrep < 0) {
-        perror("Failed to create a grep child process");
-        exit(EXIT_FAILURE);
-    }
 
     switch (pidForkGrep) {
         case -1:
