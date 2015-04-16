@@ -10,13 +10,18 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <signal.h>
 
-#define wordsFileNameIndex 1
-#define searchFileNameIndex 2
+#define wordsFilePathIndex 1
+#define searchFilePathIndex 2
 #define PIPEREAD 0
 #define PIPEWRITE 1
 
 #define CHAR_BUFFER_SIZE 128
+#define MAX_CHILD_PROCESSES = 200;
+
+long nChildProcesses = 0;
+long maxChildProcesses;
 
 const char sedSubBeginning[] = "s/([0-9]*).*/";
 const char sedSubEnd[] = "\\1/";
@@ -26,7 +31,12 @@ const size_t sedConstantLen =
     (sizeof(sedSubBeginning) + sizeof(sedSubEnd) +
      sizeof(firstSeparatorString) + sizeof(secondSeparatorString) - 4) / sizeof(sedSubBeginning[0]);
 
+void childHandler(int signo);
+int findIndexLastChar(char *ptr, char ch, int *len);
+
 int main(int argc, char *argv[]) {
+
+    maxChildProcesses = sysconf(_SC_CHILD_MAX) / 4;
 
     if (argc != 3) {
         fprintf(stderr, "%s wordsFileName searchFileName\n", argv[0]);
@@ -34,37 +44,60 @@ int main(int argc, char *argv[]) {
     }
 
     FILE *wordsStream;
-    if ((wordsStream = fopen(argv[wordsFileNameIndex], "r")) == NULL) {
+    if ((wordsStream = fopen(argv[wordsFilePathIndex], "r")) == NULL) {
         perror("Can't find the file with the words");
         return EXIT_FAILURE;
     }
 
     struct stat stat_buf;
-    int result = stat(argv[searchFileNameIndex], &stat_buf);
+    int result = stat(argv[searchFilePathIndex], &stat_buf);
     if (result != 0 || !S_ISREG(stat_buf.st_mode)) {
         errno = EINVAL;
         perror("bad search file name");
         return EXIT_FAILURE;
     }
 
-    // fileName extension ignore rest of string
-    char *charPtr = argv[searchFileNameIndex];
-    size_t searchFileNameNotExtLen = 0;
-    for (size_t i = 0; charPtr != NULL && charPtr[i] != '\0'; ++i) {
-        if (charPtr[i] == '.') {
-            searchFileNameNotExtLen = i;
+    /** INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
+    // Because we don't use them and with don't want zombies
+    struct sigaction sigact;
+    sigact.sa_handler = childHandler;
+    // Do not receive job control notification from child
+    sigact.sa_flags = SA_NOCLDSTOP;
+    if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
+        perror("There was an error installing the SIGCHLD handler");
+        exit(EXIT_FAILURE);
+    }
+
+    sigset_t sigmask;
+    if (sigfillset(&sigmask) == -1 || sigdelset(&sigmask, SIGCHLD) == -1) {
+        perror("Failed setting the mask for SIGCHLD suspend if nChildProcesses == maxChildProcesses");
+        exit(EXIT_FAILURE);
+    }
+    /** END OF INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
+
+    // fileName no extension no slash
+    int searchFileNameLen = 0;
+    int lastSlashIndex = findIndexLastChar(argv[searchFilePathIndex], '/', &searchFileNameLen);
+    int lastDotIndex = findIndexLastChar(&argv[searchFilePathIndex][lastSlashIndex + 1], '.', NULL);
+    char *searchFileName = argv[searchFilePathIndex];
+
+    if (lastSlashIndex != -1 || lastDotIndex != -1) {
+        if (lastSlashIndex != -1 && lastDotIndex != -1) {
+            lastDotIndex += lastSlashIndex + 1;
+        } else if (lastDotIndex == -1) {
+            lastDotIndex = searchFileNameLen + 1;
         }
+        printf("lastSlashIndex %d lastDotIndex %d", lastSlashIndex , lastDotIndex);
+        searchFileNameLen = lastDotIndex - lastSlashIndex;
+        printf(" size %d", searchFileNameLen);
+        if (searchFileNameLen < 0) {
+            exit(EXIT_FAILURE);
+        }
+        searchFileName = (char *) malloc(sizeof(char) * (size_t)(searchFileNameLen + 1));
+        snprintf(searchFileName, (size_t)searchFileNameLen, "%s", &argv[searchFilePathIndex][lastSlashIndex + 1]);
     }
 
-    char *searchFileNameNotExt = charPtr;
-    if (searchFileNameNotExtLen != 0) {
-        searchFileNameNotExt = (char *) malloc(sizeof(char) * (searchFileNameNotExtLen + 1));
-        snprintf(searchFileNameNotExt, searchFileNameNotExtLen + 1, "%s", argv[searchFileNameIndex]);
-    }
-
-    puts(searchFileNameNotExt);
-
-    // Buffer for getline, if it is not enoguh it reallocs
+    // Buffer for getline, if it is not enough it reallocs
     size_t lineBufferSize = CHAR_BUFFER_SIZE;
     char *linePtr = (char *) malloc(sizeof(char) * CHAR_BUFFER_SIZE);
 
@@ -85,6 +118,8 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
 
+        if (nChildProcesses == maxChildProcesses) sigsuspend(&sigmask);
+        ++nChildProcesses;
         pid_t pidForkGrep = fork();
         if (pidForkGrep < 0) {
             perror("Failed to create a grep child process");
@@ -99,7 +134,7 @@ int main(int argc, char *argv[]) {
             case 0:
                 close(pipeGrepSed[PIPEREAD]);
                 dup2(pipeGrepSed[PIPEWRITE], STDOUT_FILENO);
-                execlp("grep", "grep", linePtr, "-n", argv[searchFileNameIndex], NULL);
+                execlp("grep", "grep", linePtr, "-i", "-n", argv[searchFilePathIndex], NULL);
                 fprintf(stderr, "failed to exec grep\n");
                 exit(EXIT_FAILURE);
                 break;
@@ -112,6 +147,8 @@ int main(int argc, char *argv[]) {
         /** END OF GREP SECTION **/
         /** START OF SED SECTION **/
 
+        if (nChildProcesses == maxChildProcesses) sigsuspend(&sigmask);
+        ++nChildProcesses;
         pid_t pidForkSed = fork();
         if (pidForkSed < 0) {
             perror("Failed to create a cut child process");
@@ -126,7 +163,7 @@ int main(int argc, char *argv[]) {
             case 0:
                 dup2(pipeGrepSed[PIPEREAD], STDIN_FILENO);
                 // Do the sed magic
-                size_t sedStringArgSize = sedConstantLen + searchFileNameNotExtLen + strlen(linePtr) + 1;
+                size_t sedStringArgSize = sedConstantLen + (size_t)searchFileNameLen + strlen(linePtr) + 1;
                 if (sedStringArgSize > sedBufferSize) {
                     char *temp = (char *) realloc(sedBufferPtr, sedStringArgSize);
                     if (temp == NULL) {
@@ -140,7 +177,7 @@ int main(int argc, char *argv[]) {
                         sedSubBeginning,
                         linePtr,
                         firstSeparatorString,
-                        searchFileNameNotExt,
+                        searchFileName,
                         secondSeparatorString,
                         sedSubEnd
                         );
@@ -157,8 +194,44 @@ int main(int argc, char *argv[]) {
     /** END OF SED SECTION **/
 
     free(linePtr);
+    free(sedBufferPtr);
     fclose(wordsStream);
 
     return EXIT_SUCCESS;
+}
+
+void childHandler(__attribute__((unused)) int signo) {
+    for (int i = 0; i < nChildProcesses; ++i) {
+        int status;
+        if (waitpid(-1, &status, WNOHANG) == -1) {
+            perror("something wrong with waitpid");
+            exit(EXIT_FAILURE);
+        }
+        if (WIFEXITED(status)) {
+            nChildProcesses--;
+        } else if (WIFSIGNALED(status)) {
+            perror("child killed by signal");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+int findIndexLastChar(char *ptr, char ch, int *len) {
+    if (ptr == NULL) {
+        return -1;
+    }
+
+    int indexOfLastChar = -1;
+    int i;
+    for (i = 0; ptr[i] != '\0'; ++i) {
+        if (ptr[i] == ch) {
+            indexOfLastChar = i;
+        }
+        if (len != NULL) {
+            *len = i;
+        }
+    }
+
+    return indexOfLastChar;
 }
 
