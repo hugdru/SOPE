@@ -82,7 +82,7 @@ static Files_t* Files(char const * const defaultWordsFileName) {
     files->filesNamesToSearch = (const char **) malloc(sizeof(char *) * DEFAULT_CHAR_ARRAY_SIZE);
     if (files->filesNamesToSearch == NULL) {
         free(files);
-        perror("There was an error creating the array of file descriptors");
+        perror("There was an error creating the array of file names");
         return NULL;
     }
     files->allocatedSize = DEFAULT_CHAR_ARRAY_SIZE;
@@ -113,7 +113,7 @@ static Files_t* addFileName(Files_t * const ptr, char const * const fileName) {
     } else if (ptr->numberOfFiles == ptr->allocatedSize) {
         tempPtr = (const char **) realloc(ptr->filesNamesToSearch, (INCREMENTOR_CHAR_ARRAY_SIZE + ptr->allocatedSize) * sizeof(char *));
         if (tempPtr == NULL) {
-            perror("There was an error extending the array of file descriptors");
+            perror("There was an error extending the array of file names");
             return NULL;
         }
         ptr->filesNamesToSearch = tempPtr;
@@ -143,7 +143,7 @@ static Files_t* normalizeFilesNames(Files_t * const ptr) {
     if (ptr->numberOfFiles < ptr->allocatedSize) {
         tempPtr = (const char **) realloc(ptr->filesNamesToSearch, sizeof(char *) * ptr->numberOfFiles);
         if (tempPtr == NULL) {
-            perror("There was an error normalizing the array of file descriptors");
+            perror("There was an error normalizing the array of file names");
             return NULL;
         }
         ptr->allocatedSize = ptr->numberOfFiles;

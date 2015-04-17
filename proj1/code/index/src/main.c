@@ -39,10 +39,18 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    // get original working directory
+    char *originalWd = getcwd(NULL, 0);
+    if (originalWd == NULL) {
+        perror("can't get working directory");
+        exit(EXIT_FAILURE);
+    }
+
     // Get the files to be worked on
     Files_t* files = getAllFilesNames(argv[DIRPATHINDEX], defaultWordsFileName);
     if (files == NULL) {
         perror("Something went wrong finding the files");
+        free(originalWd);
         exit(EXIT_FAILURE);
     }
 
@@ -55,7 +63,11 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "You must create the %s file\n", defaultWordsFileName);
         escape = true;
     }
-    if (escape) exit(EXIT_FAILURE);
+    if (escape) {
+        free(originalWd);
+        wipe(files);
+        exit(EXIT_FAILURE);
+    }
 
     /** INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
     // Because we don't use them and with don't want zombies
@@ -66,12 +78,16 @@ int main(int argc, char *argv[]) {
     sigact.sa_flags = SA_NOCLDSTOP;
     if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
         perror("There was an error installing the SIGCHLD handler");
+        free(originalWd);
+        wipe(files);
         exit(EXIT_FAILURE);
     }
 
     sigset_t sigmask;
     if (sigfillset(&sigmask) == -1 || sigdelset(&sigmask, SIGCHLD) == -1) {
         perror("Failed setting the mask for SIGCHLD suspend if nChildProcesses == maxChildProcesses");
+        free(originalWd);
+        wipe(files);
         exit(EXIT_FAILURE);
     }
     /** END OF INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
@@ -79,6 +95,8 @@ int main(int argc, char *argv[]) {
     int tempFilePathLen = snprintf(tempFilePath, tempFilePathDirBufSize, "%s-%d/", tempFilePathDir, getpid());
     if (tempFilePathLen < 0) {
         perror("Failed to create string temp file path dir");
+        free(originalWd);
+        wipe(files);
         exit(EXIT_FAILURE);
     }
 
@@ -87,6 +105,9 @@ int main(int argc, char *argv[]) {
         if (errno == EEXIST) {
             fprintf(stderr, "Remove the %s directory manually\n", tempFilePath);
         }
+        free(originalWd);
+        free(tempFilePath);
+        wipe(files);
         exit(EXIT_FAILURE);
     }
 
@@ -101,8 +122,11 @@ int main(int argc, char *argv[]) {
             case -1:
                 {
                     perror("Failed to create a sw child process");
+                    free(originalWd);
+                    free(tempFilePath);
+                    wipe(files);
+                    removeTempDir(tempFilePath);
                     exit(EXIT_FAILURE);
-                    break;
                 }
             case 0:
                 {
@@ -121,10 +145,12 @@ int main(int argc, char *argv[]) {
                     int newTempFileDescriptor;
                     if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
                         perror("There was an error creating a temporary file");
+                        free(tempFilePath);
                         exit(EXIT_FAILURE);
                     }
                     if (dup2(newTempFileDescriptor, STDOUT_FILENO) == -1) {
                         perror("Failed to redirect child stdout");
+                        free(tempFilePath);
                         exit(EXIT_FAILURE);
                     }
 
@@ -132,10 +158,7 @@ int main(int argc, char *argv[]) {
                     free(tempFilePath);
                     fprintf(stderr, "failed to exec sw\n");
                     exit(EXIT_FAILURE);
-                    break;
                 }
-            default:
-                break;
         }
     }
     // Wait for all children to finish
@@ -144,6 +167,10 @@ int main(int argc, char *argv[]) {
     sigact.sa_flags = 0;
     if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
         perror("There was an error setting the default SIGCHLD handler");
+        free(originalWd);
+        free(tempFilePath);
+        wipe(files);
+        removeTempDir(tempFilePath);
         exit(EXIT_FAILURE);
     }
 
@@ -154,12 +181,11 @@ int main(int argc, char *argv[]) {
     } while (true);
 
     // Cleansing
+    free(originalWd);
+    free(tempFilePath);
     wipe(files);
     removeTempDir(tempFilePath);
-    free(tempFilePath);
-
-
-    return EXIT_SUCCESS;
+    exit(EXIT_SUCCESS);
 }
 
 void childHandler(__attribute__((unused)) int signo) {

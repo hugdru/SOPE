@@ -73,10 +73,6 @@ int main(int argc, char *argv[]) {
     /** START OF SED SECTION **/
 
     pid_t pidForkSed = fork();
-    if (pidForkSed < 0) {
-        perror("Failed to create a cut child process");
-        exit(EXIT_FAILURE);
-    }
 
     switch (pidForkSed) {
         case -1:
