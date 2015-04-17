@@ -7,7 +7,7 @@ OBJ = $(patsubst src/%.c, buildtemp/%.o, $(SRC))
 OUT = ../../bin/index
 
 # compiler
-CC = gcc
+CC = colorgcc
 
 .SUFFIXES: .c
 

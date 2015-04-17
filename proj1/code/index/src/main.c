@@ -91,6 +91,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     /** END OF INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
+
     char *tempFilePath = (char *) malloc(tempFilePathDirBufSize * sizeof(char));
     int tempFilePathLen = snprintf(tempFilePath, tempFilePathDirBufSize, "%s-%d/", tempFilePathDir, getpid());
     if (tempFilePathLen < 0) {
@@ -123,9 +124,9 @@ int main(int argc, char *argv[]) {
                 {
                     perror("Failed to create a sw child process");
                     free(originalWd);
-                    free(tempFilePath);
                     wipe(files);
                     removeTempDir(tempFilePath);
+                    free(tempFilePath);
                     exit(EXIT_FAILURE);
                 }
             case 0:
@@ -168,9 +169,9 @@ int main(int argc, char *argv[]) {
     if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
         perror("There was an error setting the default SIGCHLD handler");
         free(originalWd);
-        free(tempFilePath);
         wipe(files);
         removeTempDir(tempFilePath);
+        free(tempFilePath);
         exit(EXIT_FAILURE);
     }
 
@@ -179,12 +180,50 @@ int main(int argc, char *argv[]) {
             if (errno == ECHILD) break;
         }
     } while (true);
+    nChildProcesses = 0;
+
+    pid_t pidCsc = fork();
+
+    switch (pidCsc) {
+        case -1:
+            {
+                perror("Failed to create a csc child process");
+                free(originalWd);
+                wipe(files);
+                removeTempDir(tempFilePath);
+                free(tempFilePath);
+                exit(EXIT_FAILURE);
+            }
+        case 0:
+            {
+                /*puts(originalWd);*/
+                /*if (chdir(originalWd) == -1) {*/
+                    /*puts("Child failed to change directory");*/
+                    /*exit(EXIT_FAILURE);*/
+                /*}*/
+                /*int indexDescriptor;*/
+                /*if ((indexDescriptor = open("index.txt", O_WRONLY | O_TRUNC | O_CREAT, 0660)) == -1) {*/
+                    /*puts("Child failed to create index.txt");*/
+                    /*exit(EXIT_FAILURE);*/
+                /*}*/
+                /*dup2(indexDescriptor, STDOUT_FILENO);*/
+                puts(tempFilePath);
+                execl("../csc", "csc", tempFilePath, NULL);
+                fprintf(stderr, "failed to exec csc\n");
+                exit(EXIT_FAILURE);
+            }
+    }
+    do {
+        if (wait(NULL) == -1) {
+            if (errno == ECHILD) break;
+        }
+    } while (true);
 
     // Cleansing
     free(originalWd);
-    free(tempFilePath);
     wipe(files);
     removeTempDir(tempFilePath);
+    free(tempFilePath);
     exit(EXIT_SUCCESS);
 }
 
