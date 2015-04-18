@@ -163,7 +163,10 @@ int main(int argc, char *argv[]) {
 
 
                     int newTempFileDescriptor;
-                    if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
+                    // o_dsync options make sure when child dies everything that is needed
+                    // for the file to be read as been transfered to disk, some non crucial
+                    // metadata may be left behind. However it may still be in disk cache?
+                    if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL | O_DSYNC, 0700)) == -1) {
                         perror("There was an error creating a temporary file");
                         goto cleanUpChild;
                     }
@@ -204,6 +207,11 @@ int main(int argc, char *argv[]) {
     } while (true);
     nChildProcesses = 0;
 
+    // Even though we waited for all the children to end the file may not have been
+    // written to disk, it may still be in a buffer somewhere or in disk cache. We could
+    // place a sync here but because we did open with the o_dsync option that is no longer needed
+    // What about if it is in disk cache?
+
     pid_t pidCsc = fork();
 
     switch (pidCsc) {
@@ -214,15 +222,17 @@ int main(int argc, char *argv[]) {
             }
         case 0:
             {
+                puts(tempFilePath);
                 // Change dir to where index was called, this is needed because
                 // getAllFilesNames(...) changes dir to where the search files are located
                 if (chdir(originalWd) == -1) {
-                    puts("Csc child failed to change directory");
+                    perror("Csc child failed to change directory");
                     goto cleanUpChild;
                 }
                 int indexDescriptor;
-                if ((indexDescriptor = open("index.txt", O_WRONLY | O_EXCL | O_CREAT, 0660)) == -1) {
-                    puts("Child failed to create index.txt");
+                // Make sure everything gets written to disk before child dies
+                if ((indexDescriptor = open("index.txt", O_WRONLY | O_EXCL | O_CREAT | O_SYNC, 0660)) == -1) {
+                    perror("Child failed to create index.txt");
                     goto cleanUpChild;
                 }
                 // Trick csc into outputing to file instead of stdout
@@ -237,12 +247,23 @@ int main(int argc, char *argv[]) {
     }
     // Wait for csc to end before we clean
     do {
-        if (wait(NULL) == -1) {
+        int status;
+        if (wait(&status) == -1) {
             if (errno == ECHILD) break;
             else {
                 fprintf(stderr, "There was an error waiting for the csc to finish\n");
                 goto cleanUpParent;
             }
+        }
+
+        if (WIFEXITED(status)) {
+            if (WEXITSTATUS(status) != EXIT_SUCCESS) {
+                fprintf(stderr, "Something wrong with a child\n");
+                goto cleanUpParent;
+            }
+        } else if (WIFSIGNALED(status)) {
+            fprintf(stderr, "child killed by signal\n");
+            goto cleanUpParent;
         }
     } while (true);
 
@@ -255,7 +276,7 @@ int main(int argc, char *argv[]) {
 cleanUpParent:
     free(originalWd);
     wipe(files);
-    removeTempDir(tempFilePath);
+    /*removeTempDir(tempFilePath);*/
     free(tempFilePath);
     exit(EXIT_FAILURE);
 cleanUpChild:
@@ -273,9 +294,13 @@ void childHandler(__attribute__((unused)) int signo) {
             exit(EXIT_FAILURE);
         }
         if (WIFEXITED(status)) {
+            if (WEXITSTATUS(status) != EXIT_SUCCESS) {
+                fprintf(stderr, "something wrong with a child\n");
+                exit(EXIT_FAILURE);
+            }
             nChildProcesses--;
         } else if (WIFSIGNALED(status)) {
-            perror("child killed by signal");
+            fprintf(stderr, "child killed by signal\n");
             exit(EXIT_FAILURE);
         }
     }
