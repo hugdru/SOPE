@@ -163,10 +163,7 @@ int main(int argc, char *argv[]) {
 
 
                     int newTempFileDescriptor;
-                    // o_dsync options make sure when child dies everything that is needed
-                    // for the file to be read as been transfered to disk, some non crucial
-                    // metadata may be left behind. However it may still be in disk cache?
-                    if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL | O_DSYNC, 0700)) == -1) {
+                    if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
                         perror("There was an error creating a temporary file");
                         goto cleanUpChild;
                     }
@@ -208,9 +205,10 @@ int main(int argc, char *argv[]) {
     nChildProcesses = 0;
 
     // Even though we waited for all the children to end the file may not have been
-    // written to disk, it may still be in a buffer somewhere or in disk cache. We could
-    // place a sync here but because we did open with the o_dsync option that is no longer needed
-    // What about if it is in disk cache?
+    // written to disk, it may still be in a buffer somewhere or in disk cache.
+    // Sync makes sure that all buffered modifications to files are written to the
+    // underlying filesystems.
+    sync();
 
     pid_t pidCsc = fork();
 
@@ -222,7 +220,6 @@ int main(int argc, char *argv[]) {
             }
         case 0:
             {
-                puts(tempFilePath);
                 // Change dir to where index was called, this is needed because
                 // getAllFilesNames(...) changes dir to where the search files are located
                 if (chdir(originalWd) == -1) {
@@ -230,8 +227,7 @@ int main(int argc, char *argv[]) {
                     goto cleanUpChild;
                 }
                 int indexDescriptor;
-                // Make sure everything gets written to disk before child dies
-                if ((indexDescriptor = open("index.txt", O_WRONLY | O_EXCL | O_CREAT | O_SYNC, 0660)) == -1) {
+                if ((indexDescriptor = open("index.txt", O_WRONLY | O_TRUNC | O_CREAT, 0660)) == -1) {
                     perror("Child failed to create index.txt");
                     goto cleanUpChild;
                 }
@@ -249,7 +245,9 @@ int main(int argc, char *argv[]) {
     do {
         int status;
         if (wait(&status) == -1) {
-            if (errno == ECHILD) break;
+            if (errno == ECHILD) {
+                break;
+            }
             else {
                 fprintf(stderr, "There was an error waiting for the csc to finish\n");
                 goto cleanUpParent;
@@ -266,6 +264,8 @@ int main(int argc, char *argv[]) {
             goto cleanUpParent;
         }
     } while (true);
+
+    sync();
 
     // Cleansing on success
     free(originalWd);

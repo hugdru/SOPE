@@ -22,7 +22,7 @@ Compilation instructions:
 
 Execution instructions:
     Add bin to the path, if in the root project folder
-    export PATH="$PATH:$(pwd)/bin"
+    source addBinToPath
 
     Temporary folder path /tmp/index-{pid}, it gets deleted when program
     ends because of error or not.
