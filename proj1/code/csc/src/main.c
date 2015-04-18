@@ -18,6 +18,8 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    // Fills the cats arguments, cat + files + NULL
+    // Internally calls some functions to create, add and normalize a struct MyArgs
     MyArgs_t *myCatArgs;
     if ((myCatArgs = fillMyArgs(argv[DIRPATHINDEX], "cat")) == NULL) {
         perror("failed to fill my args for cat");
@@ -56,14 +58,14 @@ int main(int argc, char *argv[]) {
         goto cleanUp;
     case 0:
         dup2(pipeCatSort[PIPEREAD], STDIN_FILENO);
-        execlp("sort", "sort", "-b", NULL);
+        execlp("sort", "sort", NULL);
         fprintf(stderr, "failed to exec sort\n");
         goto cleanUp;
     default:
         close(pipeCatSort[PIPEREAD]);
     }
 
-    return EXIT_SUCCESS;
+    exit(EXIT_SUCCESS);
 cleanUp:
     wipe(myCatArgs);
     exit(EXIT_FAILURE);

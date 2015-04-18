@@ -13,8 +13,11 @@
 #define DEFAULT_CHAR_ARRAY_SIZE 10
 #define INCREMENTOR_CHAR_ARRAY_SIZE 5
 
+// Creats a MyArgs struct
 static MyArgs_t* MyArgs(void);
+// Adds a fileName to MyArgs
 static MyArgs_t* addArg(MyArgs_t * const ptr, char const * const arg);
+// Shortens the buffer to size + 1, +1 because of the NULL
 static MyArgs_t* normalize(MyArgs_t * const ptr);
 
 MyArgs_t* fillMyArgs(char const * const dirPath, char const * const programName) {
