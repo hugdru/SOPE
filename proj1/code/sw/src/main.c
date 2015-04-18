@@ -34,14 +34,14 @@ int main(int argc, char *argv[]) {
     int returned = stat(argv[wordsFilePathIndex], &stat_buf);
     if (returned != 0 || !S_ISREG(stat_buf.st_mode)) {
         errno = EINVAL;
-        perror("bad search file name");
+        perror("bad words file path");
         exit(EXIT_FAILURE);
     }
 
     returned = stat(argv[searchFilePathIndex], &stat_buf);
     if (returned != 0 || !S_ISREG(stat_buf.st_mode)) {
         errno = EINVAL;
-        perror("bad search file name");
+        perror("bad search file path");
         exit(EXIT_FAILURE);
     }
 
@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
     /** GREP SECTION **/
     int pipeGrepUniq[2];
     if (pipe(pipeGrepUniq) < 0) {
-        perror("Could not create a pipe cut -> sw");
+        perror("Could not create a pipe grep -> uniq");
         exit(EXIT_FAILURE);
     }
 
@@ -57,7 +57,7 @@ int main(int argc, char *argv[]) {
 
     switch (pidForkGrep) {
         case -1:
-            perror("Failed to fork cut");
+            perror("Failed to fork grep");
             exit(EXIT_FAILURE);
             break;
         case 0:
@@ -94,7 +94,7 @@ int main(int argc, char *argv[]) {
             close(pipeUniqSed[PIPEREAD]);
             dup2(pipeUniqSed[PIPEWRITE], STDOUT_FILENO);
             execlp("uniq", "uniq", NULL);
-            fprintf(stderr, "failed to exec cut\n");
+            fprintf(stderr, "failed to exec uniq\n");
             exit(EXIT_FAILURE);
             break;
         default:
@@ -109,14 +109,14 @@ int main(int argc, char *argv[]) {
 
     switch (pidForkSed) {
         case -1:
-            perror("Failed to fork grep");
+            perror("Failed to fork sed");
             exit(EXIT_FAILURE);
             break;
         case 0:
             close(pipeUniqSed[PIPEWRITE]);
             dup2(pipeUniqSed[PIPEREAD], STDIN_FILENO);
             execlp("sed", "sed", "-r", sedMagic, NULL);
-            fprintf(stderr, "failed to exec cut\n");
+            fprintf(stderr, "failed to exec sed\n");
             exit(EXIT_FAILURE);
             break;
         default:
