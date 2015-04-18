@@ -14,7 +14,7 @@
 #define NKIDS 3
 
 char catString[] = "cat";
-char sedMagic[] = ":a;N;s/^([^:]*)(.*)\\n\\1: (.*)$/\\1\\2, \\3/;ba";
+char sedMagic[] = ":a;$!N;s/^([^:]*)(.*)\\n\\1: (.*)$/\\1\\2, \\3/;ta;P;D";
 
 int main(int argc, char *argv[]) {
 
