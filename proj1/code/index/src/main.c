@@ -144,15 +144,17 @@ int main(int argc, char *argv[]) {
             case -1:
                 {
                     perror("Failed to create a sw child process");
-                    goto cleanUp;
+                    goto cleanUpParent;
                 }
             case 0:
                 {
-                    tempFilePath = (char *) realloc(tempFilePath, tempFilePathBufSize);
-                    if (tempFilePath == NULL) {
+                    // Extend buffer to hold the temp filename, path dir + tempFilename
+                    char *tempPtr = (char *) realloc(tempFilePath, tempFilePathBufSize);
+                    if (tempPtr == NULL) {
                         perror("Failed to allocate space for a temp file path");
-                        exit(EXIT_FAILURE);
+                        goto cleanUpChild;
                     }
+                    tempFilePath = tempPtr;
                     snprintf(
                             &tempFilePath[tempFilePathLen], NAME_MAX,
                             "%s",
@@ -163,17 +165,17 @@ int main(int argc, char *argv[]) {
                     int newTempFileDescriptor;
                     if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
                         perror("There was an error creating a temporary file");
-                        goto cleanUp;
+                        goto cleanUpChild;
                     }
                     if (dup2(newTempFileDescriptor, STDOUT_FILENO) == -1) {
                         perror("Failed to redirect child stdout");
-                        goto cleanUp;
+                        goto cleanUpChild;
                     }
 
                     // Because of the chdir inside getAllFilesName(...) we don't need the files full path only the names
                     execlp("sw", "sw", defaultWordsFileName, files->filesNamesToSearch[index], NULL);
                     fprintf(stderr, "failed to exec sw\n");
-                    goto cleanUp;
+                    goto cleanUpChild;
                 }
         }
     }
@@ -187,7 +189,7 @@ int main(int argc, char *argv[]) {
     sigact.sa_flags = 0;
     if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
         perror("There was an error setting the default SIGCHLD handler");
-        goto cleanUp;
+        goto cleanUpParent;
     }
 
     // Waits for all the children to end
@@ -196,7 +198,7 @@ int main(int argc, char *argv[]) {
             if (errno == ECHILD) break;
             else {
                 fprintf(stderr, "There was an error waiting for all the sws to finish\n");
-                goto cleanUp;
+                goto cleanUpParent;
             }
         }
     } while (true);
@@ -208,7 +210,7 @@ int main(int argc, char *argv[]) {
         case -1:
             {
                 perror("Failed to create a csc child process");
-                goto cleanUp;
+                goto cleanUpParent;
             }
         case 0:
             {
@@ -216,21 +218,21 @@ int main(int argc, char *argv[]) {
                 // getAllFilesNames(...) changes dir to where the search files are located
                 if (chdir(originalWd) == -1) {
                     puts("Csc child failed to change directory");
-                    goto cleanUp;
+                    goto cleanUpChild;
                 }
                 int indexDescriptor;
                 if ((indexDescriptor = open("index.txt", O_WRONLY | O_EXCL | O_CREAT, 0660)) == -1) {
                     puts("Child failed to create index.txt");
-                    goto cleanUp;
+                    goto cleanUpChild;
                 }
                 // Trick csc into outputing to file instead of stdout
                 if (dup2(indexDescriptor, STDOUT_FILENO) == -1) {
                     perror("Shallow copy of indexDescriptor to STDOUT_FILENO failed");
-                    goto cleanUp;
+                    goto cleanUpChild;
                 }
                 execlp("csc", "csc", tempFilePath, NULL);
                 fprintf(stderr, "failed to exec csc\n");
-                goto cleanUp;
+                goto cleanUpChild;
             }
     }
     // Wait for csc to end before we clean
@@ -239,7 +241,7 @@ int main(int argc, char *argv[]) {
             if (errno == ECHILD) break;
             else {
                 fprintf(stderr, "There was an error waiting for the csc to finish\n");
-                goto cleanUp;
+                goto cleanUpParent;
             }
         }
     } while (true);
@@ -250,11 +252,15 @@ int main(int argc, char *argv[]) {
     removeTempDir(tempFilePath);
     free(tempFilePath);
     exit(EXIT_SUCCESS);
-    // Cleansing on fail
-cleanUp:
+cleanUpParent:
     free(originalWd);
     wipe(files);
     removeTempDir(tempFilePath);
+    free(tempFilePath);
+    exit(EXIT_FAILURE);
+cleanUpChild:
+    free(originalWd);
+    wipe(files);
     free(tempFilePath);
     exit(EXIT_FAILURE);
 }
