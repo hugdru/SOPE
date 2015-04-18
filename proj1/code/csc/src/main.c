@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
     case 0:
         dup2(pipeCatSort[PIPEREAD], STDIN_FILENO);
         close(pipeSortSed[PIPEREAD]);
-        dup2(pipeCatSort[PIPEWRITE], STDOUT_FILENO);
+        dup2(pipeSortSed[PIPEWRITE], STDOUT_FILENO);
         execlp("sort", "sort", "-b", NULL);
         fprintf(stderr, "failed to exec sort\n");
         goto cleanUp;
