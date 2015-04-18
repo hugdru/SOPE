@@ -13,8 +13,11 @@
 #define DEFAULT_CHAR_ARRAY_SIZE 10
 #define INCREMENTOR_CHAR_ARRAY_SIZE 5
 
+// Creates a Files struct
 static Files_t* Files(char const * const defaultWordsFileName);
+// Adds a fileName to the struct
 static Files_t* addFileName(Files_t * const ptr, char const * const fileName);
+// Shorten the buffer to the needed size
 static Files_t* normalizeFilesNames(Files_t * const ptr);
 
 Files_t* getAllFilesNames(char const * const dirPath, char const * const defaultWordsFileName) {

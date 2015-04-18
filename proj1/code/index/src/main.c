@@ -249,7 +249,7 @@ int main(int argc, char *argv[]) {
     // Cleansing on success
     free(originalWd);
     wipe(files);
-    removeTempDir(tempFilePath);
+    /*removeTempDir(tempFilePath);*/
     free(tempFilePath);
     exit(EXIT_SUCCESS);
 cleanUpParent:
