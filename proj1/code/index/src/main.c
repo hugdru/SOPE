@@ -14,6 +14,7 @@
 #include "Files.h"
 
 #define DIRPATHINDEX 1
+#define INDEXPATHINDEX 2
 #define PIPEREAD 0
 #define PIPEWRITE 1
 
@@ -21,6 +22,7 @@ long nChildProcesses = 0;
 
 // Name of the file which holds the words
 const char defaultWordsFileName[] = "words.txt";
+const char defaultIndexFileName[] = "index.txt";
 
 // "/tmp/index-pid/fileName"
 // Incomplete(missing -pid) dir where we will place the sw result files
@@ -45,8 +47,9 @@ int main(int argc, char *argv[]) {
     // Max number of processes index can have at any given time
     const long maxChildProcesses = sysconf(_SC_CHILD_MAX) / 4;
 
-    if (argc != 2) {
+    if (argc != 2 && argc != 3) {
         fprintf(stderr, "%s <directory>\n", argv[0]);
+        fprintf(stderr, "%s <directory> <IndexPath>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -61,7 +64,8 @@ int main(int argc, char *argv[]) {
     // Fills the files struct with all the file names in a given directory
     // This helper function is smart enough to allocate only the needed space
     // It changes dir inside it so we must have that in mind
-    Files_t* files = getAllFilesNames(argv[DIRPATHINDEX], defaultWordsFileName);
+    // It ignores the defaultIndexFileName
+    Files_t* files = getAllFilesNames(argv[DIRPATHINDEX], defaultWordsFileName, defaultIndexFileName);
     if (files == NULL) {
         perror("Something went wrong finding the files");
         free(originalWd);
@@ -220,15 +224,18 @@ int main(int argc, char *argv[]) {
             }
         case 0:
             {
-                // Change dir to where index was called, this is needed because
-                // getAllFilesNames(...) changes dir to where the search files are located
-                if (chdir(originalWd) == -1) {
-                    perror("Csc child failed to change directory");
-                    goto cleanUpChild;
-                }
                 int indexDescriptor;
-                if ((indexDescriptor = open("index.txt", O_WRONLY | O_TRUNC | O_CREAT, 0660)) == -1) {
-                    perror("Child failed to create index.txt");
+                if (argc == 2) {
+                    indexDescriptor = open(defaultIndexFileName, O_WRONLY | O_TRUNC | O_CREAT, 0660);
+                } else {
+                    if (chdir(originalWd) == -1) {
+                        perror("Failed to change directory");
+                        goto cleanUpChild;
+                    }
+                    indexDescriptor = open(argv[INDEXPATHINDEX], O_WRONLY | O_EXCL | O_CREAT, 0660);
+                }
+                if (indexDescriptor == -1) {
+                    perror("Csc failed to create final file for index");
                     goto cleanUpChild;
                 }
                 // Trick csc into outputing to file instead of stdout

@@ -14,19 +14,20 @@
 #define INCREMENTOR_CHAR_ARRAY_SIZE 5
 
 // Creates a Files struct
-static Files_t* Files(char const * const defaultWordsFileName);
+static Files_t* Files(char const * const defaultWordsFileName, char const * const defaultIndexFileName);
 // Adds a fileName to the struct
 static Files_t* addFileName(Files_t * const ptr, char const * const fileName);
 // Shorten the buffer to the needed size
 static Files_t* normalizeFilesNames(Files_t * const ptr);
 
-Files_t* getAllFilesNames(char const * const dirPath, char const * const defaultWordsFileName) {
+Files_t* getAllFilesNames(char const * const dirPath, char const * const defaultWordsFileName,
+        char const * const defaultIndexFileName) {
     if (dirPath == NULL || defaultWordsFileName == NULL) {
         errno = EINVAL;
         return NULL;
     }
 
-    Files_t *filesToSearch = Files(defaultWordsFileName);
+    Files_t *filesToSearch = Files(defaultWordsFileName, defaultIndexFileName);
 
     DIR *directoryPtr;
     struct dirent *direntPtr;
@@ -49,6 +50,7 @@ Files_t* getAllFilesNames(char const * const dirPath, char const * const default
         }
 
         if (S_ISREG(stat_buf.st_mode)) {
+            if (strcasecmp(direntPtr->d_name, filesToSearch->indexFileName) == 0) continue;
             addFileName(filesToSearch, direntPtr->d_name);
         }
     }
@@ -74,7 +76,7 @@ void wipe(Files_t * const ptr) {
     free(ptr);
 }
 
-static Files_t* Files(char const * const defaultWordsFileName) {
+static Files_t* Files(char const * const defaultWordsFileName, char const * const defaultIndexFileName) {
 
     Files_t *files = (Files_t *) malloc(sizeof(Files_t));
     if (files == NULL) {
@@ -92,6 +94,7 @@ static Files_t* Files(char const * const defaultWordsFileName) {
     files->numberOfFiles = 0;
     files->foundDefaultWordsFileName = false;
     files->wordsFileName = defaultWordsFileName;
+    files->indexFileName = defaultIndexFileName;
 
     return files;
 }

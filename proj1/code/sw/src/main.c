@@ -94,6 +94,22 @@ int main(int argc, char *argv[]) {
     }
     /** END OF SED SECTION **/
 
+    int status;
+    if (wait(&status) == -1) {
+        fprintf(stderr, "There was an error waiting for children\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (WIFEXITED(status)) {
+        if (WEXITSTATUS(status) != EXIT_SUCCESS) {
+            fprintf(stderr, "Something wrong with a child\n");
+            exit(EXIT_FAILURE);
+        }
+    } else if (WIFSIGNALED(status)) {
+        fprintf(stderr, "child killed by signal\n");
+        exit(EXIT_FAILURE);
+    }
+
     exit(EXIT_SUCCESS);
 }
 

@@ -12,6 +12,7 @@
 typedef struct Files {
     char const **filesNamesToSearch;
     char const *wordsFileName;
+    char const *indexFileName;
     size_t numberOfFiles;
     size_t allocatedSize;
     size_t foundDefaultWordsFileName;
@@ -19,7 +20,8 @@ typedef struct Files {
 
 // Navigate in a directory and store in filesNamesToSearch all the filesNames of the files
 // present in that directory. Calls other functions to create, add and normalize a Files struct.
-Files_t* getAllFilesNames(char const * const path, char const * const defaultWordsFileName);
+Files_t* getAllFilesNames(char const * const path, char const * const defaultWordsFileName,
+        char const * const defaultIndexFileName);
 // We freed the array of pointers but not the strings because its the Kernels job to do that
 // Because those strings get returned by it, if we clean it all hell breaks loose
 void wipe(Files_t * const ptr);

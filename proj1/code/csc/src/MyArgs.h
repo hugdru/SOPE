@@ -6,12 +6,12 @@
 #include <stdlib.h>
 
 typedef struct MyArgs {
-    char const **args;
+    char **args;
     size_t allocatedSize;
     size_t size;
 } MyArgs_t;
 
-MyArgs_t* fillMyArgs(char const * const dirPath, char const * const programName);
+MyArgs_t* fillMyArgs(char const * const dirPath, char * const programName);
 void wipe(MyArgs_t * const ptr);
 
 #endif
