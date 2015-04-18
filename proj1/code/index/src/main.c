@@ -19,19 +19,30 @@
 
 long nChildProcesses = 0;
 
+// Name of the file which holds the words
 const char defaultWordsFileName[] = "words.txt";
 
-const char tempFilePathDir[] = "/tmp/index";
 // "/tmp/index-pid/fileName"
+// Incomplete(missing -pid) dir where we will place the sw result files
+const char tempFilePathDir[] = "/tmp/index";
+// Size of the buffer which holds the complete temp directory path
 const size_t tempFilePathDirBufSize = (sizeof(tempFilePathDir) / sizeof(tempFilePathDir[0])) + (1 + 7 + 1) * sizeof(char);
+// Size of the buffer which holds the complete temp directory path + fileName max size
 const size_t tempFilePathBufSize = (sizeof(tempFilePathDir) / sizeof(tempFilePathDir[0])) + (1 + 7 + 1 + NAME_MAX) * sizeof(char);
 
+// Handler to reap the children and to decrement the
+// number of indexe's active children
 void childHandler(int signo);
+
+// Function which removes the temp file dir
 void removeTempDir(char *dirPath);
+// Handler for the ftw function which we use
+// to recursively delete files inside a folder
 int ftwHandler(const char *fpath, const struct stat *sb, int typeflag);
 
 int main(int argc, char *argv[]) {
 
+    // Max number of processes index can have at any given time
     const long maxChildProcesses = sysconf(_SC_CHILD_MAX) / 4;
 
     if (argc != 2) {
@@ -39,14 +50,17 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // get original working directory
+    // Gets the original working directory it is needed because
+    // the helper function getAllfilesNames changes dir
     char *originalWd = getcwd(NULL, 0);
     if (originalWd == NULL) {
         perror("can't get working directory");
         exit(EXIT_FAILURE);
     }
 
-    // Get the files to be worked on
+    // Fills the files struct with all the file names in a given directory
+    // This helper function is smart enough to allocate only the needed space
+    // It changes dir inside it so we must have that in mind
     Files_t* files = getAllFilesNames(argv[DIRPATHINDEX], defaultWordsFileName);
     if (files == NULL) {
         perror("Something went wrong finding the files");
@@ -70,7 +84,10 @@ int main(int argc, char *argv[]) {
     }
 
     /** INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
-    // Because we don't use them and with don't want zombies
+    // This is needed to void zombies and also makes it
+    // possible to limit how many processes index can have
+    // at any given time, so we don't fill the pids if
+    // there are too many files to search
     struct sigaction sigact;
     sigact.sa_handler = childHandler;
     sigemptyset(&sigact.sa_mask);
@@ -92,6 +109,9 @@ int main(int argc, char *argv[]) {
     }
     /** END OF INSTALL SIGCHLD HANDLER AND FILL SUSPEND MASK**/
 
+    // Allocate tempory space for the temp directory where I will place the results of each sw
+    // Folder has the format /tmp/index-pid/
+    // This way we can have many index processes working at the same time
     char *tempFilePath = (char *) malloc(tempFilePathDirBufSize * sizeof(char));
     int tempFilePathLen = snprintf(tempFilePath, tempFilePathDirBufSize, "%s-%d/", tempFilePathDir, getpid());
     if (tempFilePathLen < 0) {
@@ -101,6 +121,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    // Create the folder where I will place the temporary results of each sw
     if (mkdir(tempFilePath, 0770) == -1) {
         perror("Failed to create temp file folder");
         if (errno == EEXIST) {
@@ -123,11 +144,7 @@ int main(int argc, char *argv[]) {
             case -1:
                 {
                     perror("Failed to create a sw child process");
-                    free(originalWd);
-                    wipe(files);
-                    removeTempDir(tempFilePath);
-                    free(tempFilePath);
-                    exit(EXIT_FAILURE);
+                    goto cleanUp;
                 }
             case 0:
                 {
@@ -146,38 +163,41 @@ int main(int argc, char *argv[]) {
                     int newTempFileDescriptor;
                     if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
                         perror("There was an error creating a temporary file");
-                        free(tempFilePath);
-                        exit(EXIT_FAILURE);
+                        goto cleanUp;
                     }
                     if (dup2(newTempFileDescriptor, STDOUT_FILENO) == -1) {
                         perror("Failed to redirect child stdout");
-                        free(tempFilePath);
-                        exit(EXIT_FAILURE);
+                        goto cleanUp;
                     }
 
-                    execl("../sw", "sw", defaultWordsFileName, files->filesNamesToSearch[index], NULL);
-                    free(tempFilePath);
+                    // Because of the chdir inside getAllFilesName(...) we don't need the files full path only the names
+                    execlp("sw", "sw", defaultWordsFileName, files->filesNamesToSearch[index], NULL);
                     fprintf(stderr, "failed to exec sw\n");
-                    exit(EXIT_FAILURE);
+                    goto cleanUp;
                 }
         }
     }
-    // Wait for all children to finish
+    // We need to uninstall the default child handler
+    // because its reaping loop may end just before
+    // a child dies and also because we must wait for all
+    // the children to end before we do csc and that is not
+    // possible via only this handler and the number of children
     sigemptyset(&sigact.sa_mask);
     sigact.sa_handler = SIG_DFL;
     sigact.sa_flags = 0;
     if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
         perror("There was an error setting the default SIGCHLD handler");
-        free(originalWd);
-        wipe(files);
-        removeTempDir(tempFilePath);
-        free(tempFilePath);
-        exit(EXIT_FAILURE);
+        goto cleanUp;
     }
 
+    // Waits for all the children to end
     do {
         if (wait(NULL) == -1) {
             if (errno == ECHILD) break;
+            else {
+                fprintf(stderr, "There was an error waiting for all the sws to finish\n");
+                goto cleanUp;
+            }
         }
     } while (true);
     nChildProcesses = 0;
@@ -188,43 +208,55 @@ int main(int argc, char *argv[]) {
         case -1:
             {
                 perror("Failed to create a csc child process");
-                free(originalWd);
-                wipe(files);
-                removeTempDir(tempFilePath);
-                free(tempFilePath);
-                exit(EXIT_FAILURE);
+                goto cleanUp;
             }
         case 0:
             {
-                /*puts(originalWd);*/
-                /*if (chdir(originalWd) == -1) {*/
-                    /*puts("Child failed to change directory");*/
-                    /*exit(EXIT_FAILURE);*/
-                /*}*/
-                /*int indexDescriptor;*/
-                /*if ((indexDescriptor = open("index.txt", O_WRONLY | O_TRUNC | O_CREAT, 0660)) == -1) {*/
-                    /*puts("Child failed to create index.txt");*/
-                    /*exit(EXIT_FAILURE);*/
-                /*}*/
-                /*dup2(indexDescriptor, STDOUT_FILENO);*/
-                puts(tempFilePath);
-                execl("../csc", "csc", tempFilePath, NULL);
+                // Change dir to where index was called, this is needed because
+                // getAllFilesNames(...) changes dir to where the search files are located
+                if (chdir(originalWd) == -1) {
+                    puts("Csc child failed to change directory");
+                    goto cleanUp;
+                }
+                int indexDescriptor;
+                if ((indexDescriptor = open("index.txt", O_WRONLY | O_EXCL | O_CREAT, 0660)) == -1) {
+                    puts("Child failed to create index.txt");
+                    goto cleanUp;
+                }
+                // Trick csc into outputing to file instead of stdout
+                if (dup2(indexDescriptor, STDOUT_FILENO) == -1) {
+                    perror("Shallow copy of indexDescriptor to STDOUT_FILENO failed");
+                    goto cleanUp;
+                }
+                execlp("csc", "csc", tempFilePath, NULL);
                 fprintf(stderr, "failed to exec csc\n");
-                exit(EXIT_FAILURE);
+                goto cleanUp;
             }
     }
+    // Wait for csc to end before we clean
     do {
         if (wait(NULL) == -1) {
             if (errno == ECHILD) break;
+            else {
+                fprintf(stderr, "There was an error waiting for the csc to finish\n");
+                goto cleanUp;
+            }
         }
     } while (true);
 
-    // Cleansing
+    // Cleansing on success
     free(originalWd);
     wipe(files);
     removeTempDir(tempFilePath);
     free(tempFilePath);
     exit(EXIT_SUCCESS);
+    // Cleansing on fail
+cleanUp:
+    free(originalWd);
+    wipe(files);
+    removeTempDir(tempFilePath);
+    free(tempFilePath);
+    exit(EXIT_FAILURE);
 }
 
 void childHandler(__attribute__((unused)) int signo) {
@@ -249,11 +281,13 @@ void removeTempDir(char *dirPath) {
     }
     if (ftw(dirPath, ftwHandler, 5) == -1) {
         perror("Failed to clean files inside file temp dir");
+        free(dirPath);
         exit(EXIT_FAILURE);
     }
 
     if (rmdir(dirPath) == -1) {
         perror("Can't delete the file temp dir");
+        free(dirPath);
         exit(EXIT_FAILURE);
     }
 }
@@ -262,7 +296,7 @@ int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, 
     if (typeflag == FTW_F) {
         if (unlink(fpath) == -1) {
             perror("Failed to delete a file inside the file temp dir");
-            exit(EXIT_FAILURE);
+            return -1;
         }
     }
 
