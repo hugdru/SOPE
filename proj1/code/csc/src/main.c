@@ -14,6 +14,7 @@
 #define NKIDS 3
 
 char catString[] = "cat";
+char sedMagic[] = ":a;N;s/^([^:]*)(.*)\\n\\1: (.*)$/\\1\\2, \\3/;ba";
 
 int main(int argc, char *argv[]) {
 
@@ -80,41 +81,41 @@ int main(int argc, char *argv[]) {
         close(pipeSortSed[PIPEWRITE]);
     }
 
-    /*pid_t pidForkSed = fork();*/
+    pid_t pidForkSed = fork();
 
-    /*switch (pidForkSed) {*/
-    /*case -1:*/
-        /*perror("sed fork failed");*/
-        /*goto cleanUp;*/
-    /*case 0:*/
-        /*dup2(pipeSortSed[PIPEREAD], STDIN_FILENO);*/
-        /*close(pipeSortSed[PIPEWRITE]);*/
-        /*execlp("sed", "sed", "", NULL);*/
-        /*fprintf(stderr, "failed to exec sed\n");*/
-        /*goto cleanUp;*/
-    /*default:*/
-        /*close(pipeSortSed[PIPEREAD]);*/
-    /*}*/
+    switch (pidForkSed) {
+    case -1:
+        perror("sed fork failed");
+        goto cleanUp;
+    case 0:
+        dup2(pipeSortSed[PIPEREAD], STDIN_FILENO);
+        close(pipeSortSed[PIPEWRITE]);
+        execlp("sed", "sed", "-r", sedMagic, NULL);
+        fprintf(stderr, "failed to exec sed\n");
+        goto cleanUp;
+    default:
+        close(pipeSortSed[PIPEREAD]);
+    }
 
-    /*size_t i = 0;*/
-    /*while (i < NKIDS) {*/
-        /*int status;*/
-        /*if (wait(&status) == -1) {*/
-            /*fprintf(stderr, "There was an error waiting for children\n");*/
-            /*goto cleanUp;*/
-        /*}*/
+    size_t i = 0;
+    while (i < NKIDS) {
+        int status;
+        if (wait(&status) == -1) {
+            fprintf(stderr, "There was an error waiting for children\n");
+            goto cleanUp;
+        }
 
-        /*if (WIFEXITED(status)) {*/
-            /*if (WEXITSTATUS(status) != EXIT_SUCCESS) {*/
-                /*fprintf(stderr, "Something wrong with a child\n");*/
-                /*goto cleanUp;*/
-            /*}*/
-        /*} else if (WIFSIGNALED(status)) {*/
-            /*fprintf(stderr, "child killed by signal\n");*/
-            /*goto cleanUp;*/
-        /*}*/
-        /*++i;*/
-    /*}*/
+        if (WIFEXITED(status)) {
+            if (WEXITSTATUS(status) != EXIT_SUCCESS) {
+                fprintf(stderr, "Something wrong with a child\n");
+                goto cleanUp;
+            }
+        } else if (WIFSIGNALED(status)) {
+            fprintf(stderr, "child killed by signal\n");
+            goto cleanUp;
+        }
+        ++i;
+    }
 
     exit(EXIT_SUCCESS);
 cleanUp:

@@ -248,6 +248,7 @@ int main(int argc, char *argv[]) {
                 goto cleanUpChild;
             }
     }
+
     // Wait for csc to end before we clean
     do {
         int status;
