@@ -1,0 +1,28 @@
+Compilation instructions:
+    The makefile in the root folder calls
+    each of the 3 programs makefiles, repectively: index,
+    csc and sw.
+
+    makefile--------------|
+     index/makefile-------|
+     csc/makefile---------|
+     sw/makefile----------|
+
+    make (defaults to debug)
+    make all (same as make)
+    make debug (lots of warnings turned on and debugging support)
+    make release (optimization and exploit protection)
+
+    The executables are placed in the folder bin
+
+    the object files are placed in
+        index/buildtemp
+        csc/buildtemp
+        sw/buildtemp
+
+Execution instructions:
+    Add bin to the path, if in the root project folder
+    source addBinToPath
+
+    Temporary folder path /tmp/index-{pid}, it gets deleted when program
+    ends because of error or not.
