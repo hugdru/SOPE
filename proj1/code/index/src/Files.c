@@ -72,6 +72,12 @@ void wipe(Files_t * const ptr) {
         return;
     }
 
+    for (size_t i = 0; i < ptr->numberOfFiles; ++i) {
+        if (ptr->filesNamesToSearch[i] != NULL) {
+            free(ptr->filesNamesToSearch[i]);
+        }
+    }
+
     free(ptr->filesNamesToSearch);
     free(ptr);
 }
@@ -84,7 +90,7 @@ static Files_t* Files(char const * const defaultWordsFileName, char const * cons
         return NULL;
     }
 
-    files->filesNamesToSearch = (const char **) malloc(sizeof(char *) * DEFAULT_CHAR_ARRAY_SIZE);
+    files->filesNamesToSearch = (char **) malloc(sizeof(char *) * DEFAULT_CHAR_ARRAY_SIZE);
     if (files->filesNamesToSearch == NULL) {
         free(files);
         perror("There was an error creating the array of file names");
@@ -112,19 +118,30 @@ static Files_t* addFileName(Files_t * const ptr, char const * const fileName) {
         }
     }
 
-    char const **tempPtr;
+    char *duplicateFileName;
+    char **tempPtr;
     if (ptr->numberOfFiles < ptr->allocatedSize) {
-        ptr->filesNamesToSearch[ptr->numberOfFiles] = fileName;
+        duplicateFileName = strdup(fileName);
+        if (duplicateFileName == NULL) {
+            perror("Failed to duplicate file Name");
+            return NULL;
+        }
+        ptr->filesNamesToSearch[ptr->numberOfFiles] = duplicateFileName;
         ++ptr->numberOfFiles;
     } else if (ptr->numberOfFiles == ptr->allocatedSize) {
-        tempPtr = (const char **) realloc(ptr->filesNamesToSearch, (INCREMENTOR_CHAR_ARRAY_SIZE + ptr->allocatedSize) * sizeof(char *));
+        tempPtr = (char **) realloc(ptr->filesNamesToSearch, (INCREMENTOR_CHAR_ARRAY_SIZE + ptr->allocatedSize) * sizeof(char *));
         if (tempPtr == NULL) {
             perror("There was an error extending the array of file names");
             return NULL;
         }
+        duplicateFileName = strdup(fileName);
+        if (duplicateFileName == NULL) {
+            perror("Failed to duplicate file Name");
+            return NULL;
+        }
         ptr->filesNamesToSearch = tempPtr;
         ptr->allocatedSize += INCREMENTOR_CHAR_ARRAY_SIZE;
-        ptr->filesNamesToSearch[ptr->numberOfFiles] = fileName;
+        ptr->filesNamesToSearch[ptr->numberOfFiles] = duplicateFileName;
         ++ptr->numberOfFiles;
     }
     return ptr;
@@ -145,9 +162,9 @@ static Files_t* normalizeFilesNames(Files_t * const ptr) {
         return ptr;
     }
 
-    char const **tempPtr;
+    char **tempPtr;
     if (ptr->numberOfFiles < ptr->allocatedSize) {
-        tempPtr = (const char **) realloc(ptr->filesNamesToSearch, sizeof(char *) * ptr->numberOfFiles);
+        tempPtr = (char **) realloc(ptr->filesNamesToSearch, sizeof(char *) * ptr->numberOfFiles);
         if (tempPtr == NULL) {
             perror("There was an error normalizing the array of file names");
             return NULL;

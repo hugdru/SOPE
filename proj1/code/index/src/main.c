@@ -165,7 +165,6 @@ int main(int argc, char *argv[]) {
                             files->filesNamesToSearch[index]
                             );
 
-
                     int newTempFileDescriptor;
                     if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
                         perror("There was an error creating a temporary file");

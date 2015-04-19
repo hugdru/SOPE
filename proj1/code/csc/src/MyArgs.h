@@ -11,7 +11,10 @@ typedef struct MyArgs {
     size_t size;
 } MyArgs_t;
 
-MyArgs_t* fillMyArgs(char const * const dirPath, char * const programName);
+// Find all the files in a dir and build the argv for a certain program
+// programName, file1, file2, NULL
+MyArgs_t* fillMyArgs(char const * const dirPath, char const * const programName);
+// Clean any dynamically alocated memory
 void wipe(MyArgs_t * const ptr);
 
 #endif

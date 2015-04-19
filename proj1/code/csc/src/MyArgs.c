@@ -16,11 +16,11 @@
 // Creats a MyArgs struct
 static MyArgs_t* MyArgs(void);
 // Adds a fileName to MyArgs
-static MyArgs_t* addArg(MyArgs_t * const ptr, char * const arg);
+static MyArgs_t* addArg(MyArgs_t * const ptr, char const * const arg);
 // Shortens the buffer to size + 1, +1 because of the NULL
 static MyArgs_t* normalize(MyArgs_t * const ptr);
 
-MyArgs_t* fillMyArgs(char const * const dirPath, char * const programName) {
+MyArgs_t* fillMyArgs(char const * const dirPath, char const * const programName) {
     if (dirPath == NULL) {
         errno = EINVAL;
         return NULL;
@@ -77,6 +77,12 @@ void wipe(MyArgs_t * const ptr) {
         return;
     }
 
+    for (size_t i = 0; i < ptr->size; ++i) {
+        if (ptr->args[i] != NULL) {
+            free(ptr->args[i]);
+        }
+    }
+
     free(ptr->args);
     free(ptr);
 }
@@ -101,7 +107,7 @@ static MyArgs_t* MyArgs(void) {
     return myArgs;
 }
 
-static MyArgs_t* addArg(MyArgs_t * const ptr, char * const arg) {
+static MyArgs_t* addArg(MyArgs_t * const ptr, char const * const arg) {
     if (ptr == NULL || ptr->allocatedSize == 0 || arg == NULL || ptr->size > ptr->allocatedSize) {
         errno = EINVAL;
         return NULL;
@@ -109,7 +115,12 @@ static MyArgs_t* addArg(MyArgs_t * const ptr, char * const arg) {
 
     char **tempPtr;
     if (ptr->size < ptr->allocatedSize) {
-        ptr->args[ptr->size] = arg;
+        char *duplicateArg = strdup(arg);
+        if (duplicateArg == NULL) {
+            perror("Failed to allocate memory for an arg");
+            return NULL;
+        }
+        ptr->args[ptr->size] = duplicateArg;
         ++ptr->size;
     } else if (ptr->size == ptr->allocatedSize) {
         tempPtr = (char **) realloc(ptr->args, (INCREMENTOR_CHAR_ARRAY_SIZE + ptr->allocatedSize) * sizeof(char *));
@@ -117,9 +128,14 @@ static MyArgs_t* addArg(MyArgs_t * const ptr, char * const arg) {
             perror("There was an error extending the array of char pointers");
             return NULL;
         }
+        char *duplicateArg = strdup(arg);
+        if (duplicateArg == NULL) {
+            perror("Failed to allocate memory for an arg");
+            return NULL;
+        }
         ptr->args = tempPtr;
         ptr->allocatedSize += INCREMENTOR_CHAR_ARRAY_SIZE;
-        ptr->args[ptr->size] = arg;
+        ptr->args[ptr->size] = duplicateArg;
         ++ptr->size;
     }
     return ptr;
