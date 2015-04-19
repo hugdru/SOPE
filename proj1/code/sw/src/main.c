@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
         case 0:
             close(pipeGrepUniq[PIPEREAD]);
             dup2(pipeGrepUniq[PIPEWRITE], STDOUT_FILENO);
-            execlp("grep", "grep", argv[searchFilePathIndex], "-i", "-n", "-H", "-w", "-o", "-f", argv[wordsFilePathIndex], NULL);
+            execlp("grep", "grep", argv[searchFilePathIndex], "-n", "-H", "-w", "-o", "-f", argv[wordsFilePathIndex], NULL);
             fprintf(stderr, "failed to exec grep\n");
             exit(EXIT_FAILURE);
             break;
