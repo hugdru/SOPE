@@ -8,7 +8,6 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
-#include <strings.h>
 
 #define DEFAULT_CHAR_ARRAY_SIZE 10
 #define INCREMENTOR_CHAR_ARRAY_SIZE 5
