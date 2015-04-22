@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <ftw.h>
 #include <errno.h>
+#include <stdbool.h>
 
 #include "Files.h"
 
@@ -29,8 +30,6 @@ const char defaultIndexFileName[] = "index.txt";
 const char tempFilePathDir[] = "/tmp/index";
 // Size of the buffer which holds the complete temp directory path
 const size_t tempFilePathDirBufSize = (sizeof(tempFilePathDir) / sizeof(tempFilePathDir[0])) + (1 + 7 + 1) * sizeof(char);
-// Size of the buffer which holds the complete temp directory path + fileName max size
-const size_t tempFilePathBufSize = (sizeof(tempFilePathDir) / sizeof(tempFilePathDir[0])) + (1 + 7 + 1 + NAME_MAX) * sizeof(char);
 
 // Handler to reap the children and to decrement the
 // number of indexe's active children
@@ -137,7 +136,52 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    for (size_t index = 0; index < files->numberOfFiles; ++index) {
+    // Change dir to temporary files dir
+    if (chdir(tempFilePath) == -1) {
+        perror("Failed to change to temporary files dir");
+        free(originalWd);
+        free(tempFilePath);
+        wipe(files);
+        exit(EXIT_FAILURE);
+    }
+
+    int tempFilesDescriptors[files->numberOfFiles];
+    for (size_t t = 0; t < files->numberOfFiles; ++t) {
+        tempFilesDescriptors[t] =
+            open(
+                files->filesNamesToSearch[t],
+                O_WRONLY | O_CREAT | O_EXCL | O_SYNC,
+                0700
+            );
+
+        if (tempFilesDescriptors[t] == -1) {
+            perror("Failed to create a temp file");
+            for (size_t i = 0; i < t; ++i) {
+                if (close(tempFilesDescriptors[i]) == -1) {
+                    perror("Failed closing a temp file due to error");
+                }
+            }
+            goto cleanUpParent;
+        }
+    }
+    if (argv[DIRPATHINDEX][0] != '/') {
+        if (chdir(originalWd) == -1) {
+            perror("failed to change to original working directory");
+            goto cleanUpParent;
+        }
+        if (chdir(argv[DIRPATHINDEX]) == -1) {
+            perror("failed to change to files directory");
+            goto cleanUpParent;
+        }
+    } else {
+        if (chdir(argv[DIRPATHINDEX]) == -1) {
+            perror("failed to change to files directory");
+            goto cleanUpParent;
+        }
+    }
+
+    size_t fileDescriptorIndex;
+    for (fileDescriptorIndex = 0; fileDescriptorIndex < files->numberOfFiles; ++fileDescriptorIndex) {
 
         if (nChildProcesses == maxChildProcesses) sigsuspend(&sigmask);
         ++nChildProcesses;
@@ -145,41 +189,20 @@ int main(int argc, char *argv[]) {
         pid_t pidSw = fork();
 
         switch (pidSw) {
-            case -1:
-                {
-                    perror("Failed to create a sw child process");
-                    goto cleanUpParent;
-                }
-            case 0:
-                {
-                    // Extend buffer to hold the temp filename, path dir + tempFilename
-                    char *tempPtr = (char *) realloc(tempFilePath, tempFilePathBufSize);
-                    if (tempPtr == NULL) {
-                        perror("Failed to allocate space for a temp file path");
-                        goto cleanUpChild;
-                    }
-                    tempFilePath = tempPtr;
-                    snprintf(
-                            &tempFilePath[tempFilePathLen], NAME_MAX,
-                            "%s",
-                            files->filesNamesToSearch[index]
-                            );
+        case -1: {
+            perror("Failed to create a sw child process");
+            goto cleanUpParent;
+        }
+        case 0: {
+            if (dup2(tempFilesDescriptors[fileDescriptorIndex], STDOUT_FILENO) == -1) {
+                perror("Failed to redirect child stdout");
+                goto cleanUpChild;
+            }
 
-                    int newTempFileDescriptor;
-                    if ((newTempFileDescriptor = open(tempFilePath, O_WRONLY | O_CREAT | O_EXCL, 0700)) == -1) {
-                        perror("There was an error creating a temporary file");
-                        goto cleanUpChild;
-                    }
-                    if (dup2(newTempFileDescriptor, STDOUT_FILENO) == -1) {
-                        perror("Failed to redirect child stdout");
-                        goto cleanUpChild;
-                    }
-
-                    // Because of the chdir inside getAllFilesName(...) we don't need the files full path only the names
-                    execlp("sw", "sw", defaultWordsFileName, files->filesNamesToSearch[index], NULL);
-                    fprintf(stderr, "failed to exec sw\n");
-                    goto cleanUpChild;
-                }
+            execlp("sw", "sw", defaultWordsFileName, files->filesNamesToSearch[fileDescriptorIndex], NULL);
+            fprintf(stderr, "failed to exec sw\n");
+            goto cleanUpChild;
+        }
         }
     }
     // We need to uninstall the default child handler
@@ -196,83 +219,99 @@ int main(int argc, char *argv[]) {
     }
 
     // Waits for all the children to end
-    do {
-        if (wait(NULL) == -1) {
-            if (errno == ECHILD) break;
-            else {
-                fprintf(stderr, "There was an error waiting for all the sws to finish\n");
-                goto cleanUpParent;
-            }
-        }
-    } while (true);
-    nChildProcesses = 0;
-
-    // Even though we waited for all the children to end the file may not have been
-    // written to disk, it may still be in a buffer somewhere or in disk cache.
-    // Sync makes sure that all buffered modifications to files are written to the
-    // underlying filesystems.
-    sync();
-
-    pid_t pidCsc = fork();
-
-    switch (pidCsc) {
-        case -1:
-            {
-                perror("Failed to create a csc child process");
-                goto cleanUpParent;
-            }
-        case 0:
-            {
-                int indexDescriptor;
-                if (argc == 2) {
-                    indexDescriptor = open(defaultIndexFileName, O_WRONLY | O_TRUNC | O_CREAT, 0660);
-                } else {
-                    if (chdir(originalWd) == -1) {
-                        perror("Failed to change directory");
-                        goto cleanUpChild;
-                    }
-                    indexDescriptor = open(argv[INDEXPATHINDEX], O_WRONLY | O_EXCL | O_CREAT, 0660);
-                }
-                if (indexDescriptor == -1) {
-                    perror("Csc failed to create final file for index");
-                    goto cleanUpChild;
-                }
-                // Trick csc into outputing to file instead of stdout
-                if (dup2(indexDescriptor, STDOUT_FILENO) == -1) {
-                    perror("Shallow copy of indexDescriptor to STDOUT_FILENO failed");
-                    goto cleanUpChild;
-                }
-                execlp("csc", "csc", tempFilePath, NULL);
-                fprintf(stderr, "failed to exec csc\n");
-                goto cleanUpChild;
-            }
-    }
-
-    // Wait for csc to end before we clean
-    do {
+    while (nChildProcesses > 0) {
         int status;
         if (wait(&status) == -1) {
-            if (errno == ECHILD) {
-                break;
-            }
-            else {
-                fprintf(stderr, "There was an error waiting for the csc to finish\n");
-                goto cleanUpParent;
-            }
+            perror("There was an error waiting for all the sws to finish");
+            goto cleanUpParent;
         }
-
         if (WIFEXITED(status)) {
             if (WEXITSTATUS(status) != EXIT_SUCCESS) {
                 fprintf(stderr, "Something wrong with a child\n");
                 goto cleanUpParent;
             }
+            --nChildProcesses;
         } else if (WIFSIGNALED(status)) {
             fprintf(stderr, "child killed by signal\n");
             goto cleanUpParent;
         }
-    } while (true);
+    }
 
-    sync();
+    bool failed = false;
+    for (size_t fileIndex = 0; fileIndex < files->numberOfFiles; ++fileIndex) {
+        if (close(tempFilesDescriptors[fileIndex]) == -1) {
+            failed = true;
+        }
+    }
+    if (failed) {
+        perror("Failed closing one file after waiting for all the sw children");
+        goto cleanUpParent;
+    }
+
+    // No need
+    // Even though we waited for all the children to end the file may not have been
+    // written to disk, it may still be in a buffer somewhere or in disk cache.
+    // Sync makes sure that all buffered modifications to files are written to the
+    // underlying filesystems.
+    /*sync();*/
+
+    int indexDescriptor;
+    if (argc == 2) {
+        indexDescriptor = open(defaultIndexFileName, O_WRONLY | O_TRUNC | O_CREAT | O_SYNC, 0660);
+    } else {
+        if (chdir(originalWd) == -1) {
+            perror("Failed to change directory");
+            goto cleanUpParent;
+        }
+        indexDescriptor = open(argv[INDEXPATHINDEX], O_WRONLY | O_EXCL | O_CREAT | O_SYNC, 0660);
+    }
+    if (indexDescriptor == -1) {
+        perror("Csc failed to create final file for index");
+        goto cleanUpParent;
+    }
+
+    pid_t pidCsc = fork();
+
+    switch (pidCsc) {
+    case -1: {
+        perror("Failed to create a csc child process");
+        goto cleanUpParent;
+    }
+    case 0: {
+        // Trick csc into outputing to file instead of stdout
+        if (dup2(indexDescriptor, STDOUT_FILENO) == -1) {
+            perror("Shallow copy of indexDescriptor to STDOUT_FILENO failed");
+            goto cleanUpChild;
+        }
+        execlp("csc", "csc", tempFilePath, NULL);
+        fprintf(stderr, "failed to exec csc\n");
+        goto cleanUpChild;
+    }
+    }
+
+    // Wait for csc to end before we clean
+    int status;
+    if (wait(&status) == -1) {
+        perror("There was an error waiting for the csc to finish");
+        goto cleanUpParent;
+    }
+
+    if (WIFEXITED(status)) {
+        if (WEXITSTATUS(status) != EXIT_SUCCESS) {
+            fprintf(stderr, "Something wrong with a child\n");
+            goto cleanUpParent;
+        }
+    } else if (WIFSIGNALED(status)) {
+        fprintf(stderr, "child killed by signal\n");
+        goto cleanUpParent;
+    }
+
+    if (close(indexDescriptor) == -1) {
+        perror("Failed to close csc dup file");
+        goto cleanUpParent;
+    }
+
+    /*sync();*/
 
     // Cleansing on success
     free(originalWd);
