@@ -21,6 +21,7 @@
 // sed substitute string that converts grep output to what we want
 // it ignores the path part of the file and the extension, and
 // puts everything in the format we want. Everything line by line.
+// search/ficheiro.txt:5:Sherlock  --->  Sherlock: ficheiro-5
 const char sedMagic[] = "s@^(.*/){0,1}([^:.]*)[^:]*:([^:]*):(.*)$@\\4: \\2-\\3@i";
 
 int main(int argc, char *argv[]) {
