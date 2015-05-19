@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
         dup2(pipeCatSort[PIPEREAD], STDIN_FILENO);
         close(pipeSortSed[PIPEREAD]);
         dup2(pipeSortSed[PIPEWRITE], STDOUT_FILENO);
-        execlp("sort", "sort", "-b", NULL);
+        execlp("sort", "sort", "-Vb", NULL);
         fprintf(stderr, "failed to exec sort\n");
         goto cleanUp;
     default:
