@@ -11,6 +11,7 @@
 #include <semaphore.h>
 #include <string.h>
 #include <errno.h>
+#include <pthread.h>
 
 #define MAXBALCOES 32
 #define MAXCLIENTES 128
@@ -21,11 +22,11 @@ typedef struct Info {
     int namedPipeFd;
     pthread_mutex_t namedPipeMutex;
     pthread_cond_t namedPipeCondvar;
-    size_t tempoAbertura;
     /** End of namedPipe **/
     /** Client Contributions **/
     size_t sumatorioTempoAtendimentoClientes;
     size_t nClientesAtendidos;
+    size_t tempoAbertura;
     pthread_mutex_t clientContribMutex;
     pthread_cond_t clientContribCondvar;
     /** End of Client Contributions **/
@@ -43,16 +44,18 @@ typedef struct Info {
 } Info_t;
 
 typedef struct SharedMemory {
-    Info_t *infoBalcoes[MAXBALCOES];
+    Info_t infoBalcoes[MAXBALCOES];
     size_t nBalcoes;
     pthread_mutex_t nBalcoesMutex;
     pthread_cond_t nBalcoesCondvar;
 } SharedMemory_t;
 /** Fim de Estrutas que serão partilhadas **/
 
-char *semName;
-char *shmName;
-size_t numeroBalcao;
+char *semName = NULL;
+char *shmName = NULL;
+size_t numeroBalcao = -1;
+size_t tempoAbertura = -1;
+SharedMemory_t *sharedMemory = NULL;
 
 sem_t* getGlobalSemaphore(void);
 int destroyGlobalSemaphore(sem_t *sem);
@@ -62,6 +65,7 @@ SharedMemory_t* openSharedMemory(void);
 int createFolder(void);
 int removeTempDir(void);
 int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, int typeflag);
+int createBalcao(void);
 
 const char tempFilePathDir[] = "/tmp/sope/";
 
@@ -81,7 +85,7 @@ int main(int argc, char *argv[]) {
 
     // Convert from string to unsigned long
     errno = 0;
-    size_t tempoAbertura = strtoul(argv[2], NULL, 10);
+    tempoAbertura = strtoul(argv[2], NULL, 10);
     if (errno != 0) {
         fprintf(stderr, "Failure in strtoul()");
         free(shmName);
@@ -94,8 +98,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failure in globalShemaphore()\n");
         exit(EXIT_FAILURE);
     }
-
-    SharedMemory_t *sharedMemory = NULL;
 
     // Attempt to get permission to create a semaphore
     if (sem_wait(globalShemaphore) != 0) {
@@ -121,11 +123,15 @@ int main(int argc, char *argv[]) {
     }
 
     if (chdir(tempFilePathDir) == -1) {
-        perror("Failed to change to temporary files dir");
+        perror("Failure in chdir()");
         goto cleanUp;
     }
 
     // Do this balcao stuff
+    if (createBalcao() != 0) {
+        perror("Failure in createNewBalcao()");
+        goto cleanUp;
+    }
 
 
 cleanUp:
@@ -198,6 +204,19 @@ SharedMemory_t* createSharedMemory(void) {
 
     // Initialize data
     shm->nBalcoes = 0;
+
+    // Initialize the nBalcoes mutex and condvar
+    pthread_mutexattr_t mattr;
+    pthread_mutexattr_init(&mattr);
+    pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+
+    pthread_mutex_init(&shm->nBalcoesMutex, &mattr);
+
+    pthread_condattr_t cattr;
+    pthread_condattr_init(&cattr);
+    pthread_condattr_setpshared(&cattr,PTHREAD_PROCESS_SHARED);
+
+    pthread_cond_init(&shm->nBalcoesCondvar, &cattr);
 
     return shm;
 }
@@ -307,6 +326,58 @@ int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, 
             return -1;
         }
     }
+
+    return 0;
+}
+
+int createBalcao(void) {
+
+    pthread_mutex_lock(&sharedMemory->nBalcoesMutex);
+    while (sharedMemory->nBalcoes >= MAXBALCOES)
+        pthread_cond_wait(&sharedMemory->nBalcoesCondvar, &sharedMemory->nBalcoesMutex);
+
+    Info_t *ptrBalcao = &sharedMemory->infoBalcoes[sharedMemory->nBalcoes];
+    ptrBalcao->tempoAbertura = tempoAbertura;
+    ptrBalcao->sumatorioTempoAtendimentoClientes = 0;
+    ptrBalcao->nClientesAtendidos = 0;
+    ptrBalcao->fifoCircularIndex = 0;
+    ptrBalcao->fifoSlots = MAXCLIENTES;
+
+    // Initialize the mutexes and condvars
+    pthread_mutexattr_t mattr;
+    pthread_mutexattr_init(&mattr);
+    pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+
+    pthread_mutex_init(&ptrBalcao->namedPipeMutex, &mattr);
+    pthread_mutex_init(&ptrBalcao->clientContribMutex, &mattr);
+    pthread_mutex_init(&ptrBalcao->fifoMutex, &mattr);
+    pthread_mutex_init(&ptrBalcao->fifoSlotsMutex, &mattr);
+
+    pthread_condattr_t cattr;
+    pthread_condattr_init(&cattr);
+    pthread_condattr_setpshared(&cattr,PTHREAD_PROCESS_SHARED);
+
+    pthread_cond_init(&ptrBalcao->namedPipeCondvar, &cattr);
+    pthread_cond_init(&ptrBalcao->clientContribCondvar, &cattr);
+    pthread_cond_init(&ptrBalcao->fifoCondvar, &cattr);
+    pthread_cond_init(&ptrBalcao->fifoSlotsCondvar, &cattr);
+
+    char fifoName[4];
+    snprintf(fifoName, 4, "%s%lu", "b", sharedMemory->nBalcoes);
+    if (mkfifo("b", 0660) != 0) {
+        return -1;
+    }
+
+    int fifoFd = open(fifoName, O_RDONLY);
+    if (fifoFd == -1) {
+        return -1;
+    }
+    ptrBalcao->namedPipeFd = fifoFd;
+
+    ++sharedMemory->nBalcoes;
+
+    pthread_mutex_unlock(&sharedMemory->nBalcoesMutex);
+    pthread_cond_broadcast(&sharedMemory->nBalcoesCondvar);
 
     return 0;
 }
