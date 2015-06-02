@@ -121,6 +121,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failure in globalShemaphore()\n");
         free(shmName);
     }
+    printf("Caught globalShemaphore\n");
 
     // Attempt to get permission to create a semaphore
     if (sem_wait(globalShemaphore) != 0) {
@@ -133,13 +134,17 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Failure in createSharedMemory()\n");
             goto cleanUp;
         }
+        printf("Created the shared Memory\n");
 
         if (createFolder() != 0) {
             perror("Failure in createFolder");
             goto cleanUp;
         }
 
+    } else {
+        printf("Openned the shared Memory\n");
     }
+
     if (sem_post(globalShemaphore) != 0) {
         perror("Failure in sem_post()");
         goto cleanUp;
@@ -155,6 +160,7 @@ int main(int argc, char *argv[]) {
         perror("Failure in createBalcao()");
         goto cleanUp;
     }
+    printf("Created Balcao %lu\n", numeroBalcao);
 
     // Install the alarm stuff
     struct sigaction sigact;
@@ -187,7 +193,13 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Failure in pthread_cond_wait()\n");
             goto cleanUp;
         }
-        if (bailOutOnNextClient) break;
+        if (bailOutOnNextClient) {
+            if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
+                fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
+                goto cleanUp;
+            }
+            break;
+        }
 
         if ((intelReadSize = read(namedPipeFd, intel + intelFilledSize, (size_t) (256 - intelFilledSize))) == -1) {
             perror("Failure in read");
@@ -217,6 +229,7 @@ int main(int argc, char *argv[]) {
                     }
                     snprintf(clientNamedPipe, clientNamedPipeSize, "%s", &intel[ptrStartTokenIndex]);
 
+                    printf("Balcao %lu, Attempting to answer to client, clientNamedPipe %s\n", numeroBalcao, clientNamedPipe);
                     pthread_create(&answerThreadId, NULL, answerCall, clientNamedPipe);
 
                     ptrStartTokenIndex = i + 1;
@@ -247,17 +260,21 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // disable the balcao
+    // Wait for the current client and store the ones left to answer
+    printf("Balcao %lu Time expired, waiting for the last working one and the rest to update the remaining queue size\n", numeroBalcao);
     pthread_mutex_lock(&nThreadsMutex);
     while (nThreads != 0) {
         pthread_cond_wait(&nThreadsCondvar, &nThreadsMutex);
     }
     pthread_mutex_unlock(&nThreadsMutex);
 
+    // Close this balcao
+    printf("Closing a balcao %lu\n", numeroBalcao);
     pthread_mutex_lock(&thisBalcao->clientLookMutex);
     thisBalcao->aberto = 0;
     pthread_mutex_unlock(&thisBalcao->clientLookMutex);
 
+    // Check to see if we are the last balcao
     pthread_mutex_lock(&sharedMemory->nBalcoesMutex);
     size_t nBalcoes = sharedMemory->nBalcoes;
 
@@ -271,8 +288,14 @@ int main(int argc, char *argv[]) {
         pthread_mutex_unlock(&sharedMemory->infoBalcoes[i].clientLookMutex);
     }
 
-    if (!cleanAndGenerateStatistics) EXIT_SUCCESS;
+    if (!cleanAndGenerateStatistics) {
+        pthread_mutex_unlock(&sharedMemory->nBalcoesMutex);
+        EXIT_SUCCESS;
+    }
+
+    printf("Generating statistics\n");
     if (generateStatistics() != 0) {
+        pthread_mutex_unlock(&sharedMemory->nBalcoesMutex);
         fprintf(stderr, "Failure in generateStatistics\n");
         EXIT_FAILURE;
     }
@@ -281,16 +304,20 @@ int main(int argc, char *argv[]) {
 
 cleanUp:
 
+    printf("Balcao %lu\n", numeroBalcao);
+    printf("Destroying shared memory\n");
     if (destroySharedMemory() != 0) {
         fprintf(stderr, "Failure in destroySharedMemory()\n");
         failed = 1;
     }
 
+    printf("Destroying semaphore\n");
     if (destroyGlobalSemaphore() != 0) {
         fprintf(stderr, "Failure in destroyGlobalSemaphore()\n");
         failed = 1;
     }
 
+    printf("Removing the temp directory\n");
     if (removeTempDir() != 0) {
         fprintf(stderr, "Failure in removeTempDir()\n");
         failed = 1;

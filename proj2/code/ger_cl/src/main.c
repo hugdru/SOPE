@@ -167,7 +167,13 @@ int main(int argc, char *argv[]) {
                         size_t nEmAtendimento = sharedMemory->infoBalcoes[t].nClientesEmAtendimento;
                         int aberto = sharedMemory->infoBalcoes[t].aberto;
 
-                        if (!aberto) continue;
+                        if (!aberto) {
+                            if (pthread_mutex_unlock(&sharedMemory->infoBalcoes[t].clientLookMutex) != 0) {
+                                fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
+                                goto cleanUpChild;
+                            }
+                            continue;
+                        }
                         foundAtLeastOne = 1;
 
                         if (pthread_mutex_unlock(&sharedMemory->infoBalcoes[t].clientLookMutex) != 0) {
@@ -219,27 +225,44 @@ int main(int argc, char *argv[]) {
 
                     // Wait for the return message so that we can close our clientNamedPipe
                     // The open is blocked until something is opened for writing
-                    int clientFifoFd = open(clientNamedPipeName, O_RDONLY);
-                    if (clientFifoFd == -1) {
-                        perror("Failure in open()\n");
+
+                    if (pthread_mutex_lock(&chosenBalcao->clientLookMutex) != 0) {
+                        fprintf(stderr, "Failure in pthread_mutex_lock()\n");
                         goto cleanUpChild;
                     }
 
-                    char mensagem[64];
-                    ssize_t bytesRead;
-                    if ((bytesRead = read(clientFifoFd, mensagem, 64)) == -1) {
-                        perror("Failure in read()");
+                    int aberto = chosenBalcao->aberto;
+
+                    if (pthread_mutex_unlock(&chosenBalcao->clientLookMutex) != 0) {
+                        fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
                         goto cleanUpChild;
                     }
-                    mensagem[bytesRead - 1] = '\0';
-                    puts(mensagem);
 
-                    if (close(clientFifoFd) == -1) {
-                        perror("Failure in close()");
-                    }
+                    if (aberto) {
+                        int clientFifoFd = open(clientNamedPipeName, O_RDONLY);
+                        if (clientFifoFd == -1) {
+                            perror("Failure in open()\n");
+                            goto cleanUpChild;
+                        }
 
-                    if (unlink(clientNamedPipeName) == -1) {
-                        perror("Failure in unlink()");
+                        char mensagem[64];
+                        ssize_t bytesRead;
+                        if ((bytesRead = read(clientFifoFd, mensagem, 64)) == -1) {
+                            perror("Failure in read()");
+                            goto cleanUpChild;
+                        }
+                        mensagem[bytesRead - 1] = '\0';
+                        puts(mensagem);
+
+                        if (close(clientFifoFd) == -1) {
+                            perror("Failure in close()");
+                        }
+
+                        if (unlink(clientNamedPipeName) == -1) {
+                            perror("Failure in unlink()");
+                        }
+                    } else {
+                        fprintf(stderr, "Balcao is closed\n");
                     }
 
                     free(shmName);
