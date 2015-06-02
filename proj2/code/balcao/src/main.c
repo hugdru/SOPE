@@ -173,10 +173,10 @@ int main(int argc, char *argv[]) {
             goto cleanUp;
         }
 
-        int i = 0;
+        int i = intelFilledSize;
         ptrStartTokenIndex = 0;
         while (i < intelReadSize) {
-            if (intel[i] == '\0') {
+            if (intel[i + intelFilledSize] == '\0') {
                 ptrLastSeparatorIndex = i;
                 // Call a answering thread
                 //
