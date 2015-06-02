@@ -12,6 +12,7 @@
 #include <string.h>
 #include <errno.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #define MAXBALCOES 32
 #define MAXCLIENTES 128
@@ -60,6 +61,8 @@ SharedMemory_t *sharedMemory = NULL;
 sem_t *globalShemaphore = NULL;
 /** Fim de Stuff to put in structure or that can be access globally **/
 
+char tempFilePathDir[] = "/tmp/sope";
+
 sem_t* getGlobalSemaphore(void);
 int destroyGlobalSemaphore(void);
 SharedMemory_t* createSharedMemory(void);
@@ -69,8 +72,6 @@ int createFolder(void);
 int removeTempDir(void);
 int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, int typeflag);
 int createBalcao(void);
-
-const char tempFilePathDir[] = "/tmp/sope/";
 
 int main(int argc, char *argv[]) {
 
@@ -229,7 +230,6 @@ SharedMemory_t* createSharedMemory(void) {
     return shm;
 }
 
-
 int destroySharedMemory(void) {
 
     if (sharedMemory == NULL || shmName == NULL) {
@@ -278,7 +278,6 @@ sem_t* getGlobalSemaphore(void) {
     return sem;
 }
 
-
 int destroyGlobalSemaphore(void) {
     if (globalShemaphore == NULL) {
         errno = EINVAL;
@@ -303,6 +302,7 @@ int destroyGlobalSemaphore(void) {
 }
 
 int createFolder(void) {
+
     if (mkdir(tempFilePathDir, 0770) == -1) {
         perror("Failed to create temp file folder");
         return -1;
@@ -345,14 +345,14 @@ int createBalcao(void) {
         return -1;
     }
 
-    while (sharedMemory->nBalcoes >= MAXBALCOES) {
+    while ((numeroBalcao = sharedMemory->nBalcoes) >= MAXBALCOES) {
         if (pthread_cond_wait(&sharedMemory->nBalcoesCondvar, &sharedMemory->nBalcoesMutex) != 0) {
             fprintf(stderr, "Failure in pthread_cond_wait()");
             return -1;
         }
     }
 
-    Info_t *ptrBalcao = &sharedMemory->infoBalcoes[sharedMemory->nBalcoes];
+    Info_t *ptrBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
     ptrBalcao->tempoAbertura = tempoAbertura;
     ptrBalcao->sumatorioTempoAtendimentoClientes = 0;
     ptrBalcao->nClientesAtendidos = 0;
@@ -378,8 +378,9 @@ int createBalcao(void) {
     pthread_cond_init(&ptrBalcao->fifoCondvar, &cattr);
     pthread_cond_init(&ptrBalcao->fifoSlotsCondvar, &cattr);
 
-    char fifoName[4];
-    snprintf(fifoName, 4, "%s%lu", "b", sharedMemory->nBalcoes);
+    size_t fifoNameSize = 2 + 2 + 1 + 7 + 1;
+    char fifoName[fifoNameSize];
+    snprintf(fifoName, fifoNameSize, "fb%lu_%d", numeroBalcao, getpid());
     if (mkfifo(fifoName, 0660) != 0) {
         perror("Failure in mkfifo()");
         return -1;
