@@ -191,19 +191,17 @@ int main(int argc, char *argv[]) {
                         goto cleanUpChild;
                     }
 
-                    puts(clientNamedPipeName);
+                    if (pthread_cond_signal(&chosenBalcao->namedPipeCondvar) != 0) {
+                        fprintf(stderr, "Failure in pthread_cond_signal\n");
+                        goto cleanUpChild;
+                    }
 
                     if (pthread_mutex_unlock(&sharedMemory->infoBalcoes[indexMinSlots].namedPipeMutex) != 0) {
                         fprintf(stderr, "Failure in pthread_mutex_unlock\n");
                         goto cleanUpChild;
                     }
 
-                    if (pthread_cond_signal(&chosenBalcao->namedPipeCondvar) != 0) {
-                        fprintf(stderr, "Failure in pthread_cond_signal\n");
-                        goto cleanUpChild;
-                    }
-
-                    // Wait for the return message so that we can close our namedPipe
+                    // Wait for the return message so that we can close our clientNamedPipe
                     //
                     //
                     //

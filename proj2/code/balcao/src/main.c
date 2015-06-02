@@ -156,7 +156,8 @@ int main(int argc, char *argv[]) {
     int ptrLastSeparatorIndex = 0;
     Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
 
-    while (1) {
+    int t = 0;
+    while (t < 3) {
 
         if (pthread_mutex_lock(&thisBalcao->namedPipeMutex) != 0) {
             fprintf(stderr, "Failure in pthread_mutex_lock()\n");
@@ -190,20 +191,20 @@ int main(int argc, char *argv[]) {
                 //
                 //
                 //
-                write(STDOUT_FILENO, &intel[ptrStartTokenIndex], (size_t) (ptrLastSeparatorIndex - ptrStartTokenIndex));
-                sleep(1);
-                if (i != 255) ptrStartTokenIndex = i + 1;
+                puts(&intel[ptrStartTokenIndex]);
+                ptrStartTokenIndex = i + 1;
             }
             ++i;
         }
 
-        if (ptrStartTokenIndex != 256) {
+        if (ptrStartTokenIndex != intelReadSize) {
             intelFilledSize = 255 - ptrLastSeparatorIndex;
             if (memcpy(intel, intel + ptrStartTokenIndex, (size_t) intelFilledSize) == NULL) {
                 perror("Failure in memcpy");
                 goto cleanUp;
             }
         }
+        ++t;
     }
 
 cleanUp:
@@ -462,12 +463,13 @@ int createBalcao(void) {
 
     ++sharedMemory->nBalcoes;
 
-    if (pthread_mutex_unlock(&sharedMemory->nBalcoesMutex) != 0) {
-        fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
-        return -1;
-    }
     if (pthread_cond_broadcast(&sharedMemory->nBalcoesCondvar) != 0) {
         fprintf(stderr, "Failure in pthread_cond_broadcast()\n");
+        return -1;
+    }
+
+    if (pthread_mutex_unlock(&sharedMemory->nBalcoesMutex) != 0) {
+        fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
         return -1;
     }
 
