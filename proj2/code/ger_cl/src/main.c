@@ -34,26 +34,21 @@ typedef struct Info {
     pthread_mutex_t clientContribMutex;
     pthread_cond_t clientContribCondvar;
     /** End of Client Contributions **/
-    /** Circular Fifo **/
-    size_t fifo[MAXCLIENTES];
-    size_t fifoCircularIndex;
-    pthread_mutex_t fifoMutex;
-    pthread_cond_t fifoCondvar;
-    /** End of Circular Fifo **/
-    /** Slots Available in Fifo **/
-    size_t fifoSlots;
-    pthread_mutex_t fifoSlotsMutex;
-    pthread_cond_t fifoSlotsCondvar;
-    /** End of Slots Available in Fifo **/
-    size_t tempoAbertura;
+    /** Client Look **/
+    size_t nClientesEmAtendimento;
+    int aberto;
+    pthread_mutex_t clientLookMutex;
+    pthread_cond_t clientLookCondvar;
+    /** End of Client Look **/
+    time_t tempoInicioFuncionamento;
 } Info_t;
 
 typedef struct SharedMemory {
     Info_t infoBalcoes[MAXBALCOES];
-    size_t tempoAbertura;
     size_t nBalcoes;
     pthread_mutex_t nBalcoesMutex;
     pthread_cond_t nBalcoesCondvar;
+    time_t tempoAbertura;
 } SharedMemory_t;
 /** Fim de Estrutas que serão partilhadas **/
 
@@ -160,29 +155,39 @@ int main(int argc, char *argv[]) {
 
                     size_t indexMinSlots = 0;
                     size_t minSlots = 0;
+                    int foundAtLeastOne = 0;
 
                     for (size_t t = 0; t < nBalcoes; ++t) {
 
-                        if (pthread_mutex_lock(&sharedMemory->infoBalcoes[t].fifoSlotsMutex) != 0) {
+                        if (pthread_mutex_lock(&sharedMemory->infoBalcoes[t].clientLookMutex) != 0) {
                             fprintf(stderr, "Failure in pthread_mutex_lock()\n");
                             goto cleanUpChild;
                         }
 
-                        size_t slots = sharedMemory->infoBalcoes[t].fifoSlots;
+                        size_t nEmAtendimento = sharedMemory->infoBalcoes[t].nClientesEmAtendimento;
+                        int aberto = sharedMemory->infoBalcoes[t].aberto;
 
-                        if (pthread_mutex_unlock(&sharedMemory->infoBalcoes[t].fifoSlotsMutex) != 0) {
+                        if (!aberto) continue;
+                        foundAtLeastOne = 1;
+
+                        if (pthread_mutex_unlock(&sharedMemory->infoBalcoes[t].clientLookMutex) != 0) {
                             fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
                             goto cleanUpChild;
                         }
 
                         if (t == 0) {
-                            minSlots = slots;
+                            minSlots = nEmAtendimento;
                             continue;
                         }
-                        if (minSlots > slots) {
-                            minSlots = slots;
+                        if (minSlots > nEmAtendimento) {
+                            minSlots = nEmAtendimento;
                             indexMinSlots = t;
                         }
+                    }
+
+                    if (!foundAtLeastOne) {
+                        fprintf(stderr, "Every balcao is closed");
+                        goto cleanUpChild;
                     }
 
                     Info_t *chosenBalcao = &sharedMemory->infoBalcoes[indexMinSlots];

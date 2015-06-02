@@ -15,10 +15,14 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <signal.h>
+#include <time.h>
+#include <stdlib.h>
+#include <sys/time.h>
 
 #define MAXBALCOES 32
 #define MAXCLIENTES 128
 #define NAMEDPIPESIZE (2 + 2 + 1 + 7 + 1)
+#define MAXTHREADS 128
 
 /** Estruturas que serão partilhadas **/
 typedef struct Info {
@@ -33,26 +37,21 @@ typedef struct Info {
     pthread_mutex_t clientContribMutex;
     pthread_cond_t clientContribCondvar;
     /** End of Client Contributions **/
-    /** Circular Fifo **/
-    size_t fifo[MAXCLIENTES];
-    size_t fifoCircularIndex;
-    pthread_mutex_t fifoMutex;
-    pthread_cond_t fifoCondvar;
-    /** End of Circular Fifo **/
-    /** Slots Available in Fifo **/
-    size_t fifoSlots;
-    pthread_mutex_t fifoSlotsMutex;
-    pthread_cond_t fifoSlotsCondvar;
-    /** End of Slots Available in Fifo **/
-    size_t tempoAbertura;
+    /** Client Look **/
+    size_t nClientesEmAtendimento;
+    int aberto;
+    pthread_mutex_t clientLookMutex;
+    pthread_cond_t clientLookCondvar;
+    /** End of Client Look **/
+    time_t tempoInicioFuncionamento;
 } Info_t;
 
 typedef struct SharedMemory {
     Info_t infoBalcoes[MAXBALCOES];
-    size_t tempoAbertura;
     size_t nBalcoes;
     pthread_mutex_t nBalcoesMutex;
     pthread_cond_t nBalcoesCondvar;
+    time_t tempoAbertura;
 } SharedMemory_t;
 /** Fim de Estrutas que serão partilhadas **/
 
@@ -61,10 +60,9 @@ int namedPipeFd = -1;
 char *semName = NULL;
 char *shmName = NULL;
 size_t numeroBalcao;
-size_t tempoAbertura;
+long unsigned int tempoAbertura;
 SharedMemory_t *sharedMemory = NULL;
 sem_t *globalShemaphore = NULL;
-int bailOutOnNextClient = 0;
 /** Fim de Stuff to put in structure or that can be access globally **/
 
 const char tempFilePathDir[] = "/tmp/sope";
@@ -78,7 +76,17 @@ int createFolder(void);
 int removeTempDir(void);
 int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, int typeflag);
 int createBalcao(void);
-void childHandler(__attribute__((unused)) int signo);
+void alarmHandler(__attribute__((unused)) int signo);
+void *answerCall(void *arg);
+int generateStatistics(void);
+
+pthread_mutex_t answerThreadWorkingMutex;
+pthread_cond_t answerThreadWorkingCondvar;
+
+size_t nThreads = 0;
+int bailOutOnNextClient = 0;
+pthread_mutex_t nThreadsMutex;
+pthread_cond_t nThreadsCondvar;
 
 int main(int argc, char *argv[]) {
 
@@ -150,7 +158,7 @@ int main(int argc, char *argv[]) {
 
     // Install the alarm stuff
     struct sigaction sigact;
-    sigact.sa_handler = childHandler;
+    sigact.sa_handler = alarmHandler;
     sigemptyset(&sigact.sa_mask);
     // Do not receive job control notification from child
     if (sigaction(SIGALRM, &sigact, NULL) == -1) {
@@ -167,7 +175,7 @@ int main(int argc, char *argv[]) {
     Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
 
     // Start alarm
-    alarm(tempoAbertura);
+    alarm((unsigned int) (tempoAbertura));
 
     while (1) {
         if (pthread_mutex_lock(&thisBalcao->namedPipeMutex) != 0) {
@@ -191,34 +199,26 @@ int main(int argc, char *argv[]) {
             goto cleanUp;
         }
 
+        pthread_t answerThreadId;
+
         if (intelReadSize != 0) {
             int i = intelFilledSize;
             ptrStartTokenIndex = 0;
             while (i < intelReadSize) {
                 if (intel[i + intelFilledSize] == '\0') {
 
-                    write(STDOUT_FILENO, "MERDA\n", sizeof("MERDA\n"));
-                    puts("MERDA\n");
-
                     ptrLastSeparatorIndex = i;
-                    // Call a answering thread
-                    //
-                    //
-                    //
-                    // Temporary stuff for testing
-                    int clientNamedPipeFd = open(&intel[ptrStartTokenIndex], O_WRONLY);
-                    if (clientNamedPipeFd == -1) {
-                        perror("Failure in open()\n");
-                        goto cleanUp;
-                    }
 
-                    if (write(clientNamedPipeFd, "fim_atendimento", sizeof("fim_atendimento")) == -1) {
-                        perror("Failure in read()");
+                    size_t clientNamedPipeSize = (size_t) (ptrLastSeparatorIndex - ptrStartTokenIndex + 1);
+                    char *clientNamedPipe = (char *) malloc(clientNamedPipeSize);
+                    if (clientNamedPipe == NULL) {
+                        perror("Failure in malloc()");
                         goto cleanUp;
                     }
-                    //
-                    //
-                    //
+                    snprintf(clientNamedPipe, clientNamedPipeSize, "%s", &intel[ptrStartTokenIndex]);
+
+                    pthread_create(&answerThreadId, NULL, answerCall, clientNamedPipe);
+
                     ptrStartTokenIndex = i + 1;
                 }
                 ++i;
@@ -236,6 +236,7 @@ int main(int argc, char *argv[]) {
         if (bailOutOnNextClient) break;
     }
 
+    // Disable this balcao namedPipe
     if (namedPipeFd != -1) {
         if (close(namedPipeFd) == -1) {
             perror("Failure in close()");
@@ -246,11 +247,37 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Check if its is the last one and if it is generate statistics and then clean everything
-    //
-    //
-    //
-    //
+    // disable the balcao
+    pthread_mutex_lock(&nThreadsMutex);
+    while (nThreads != 0) {
+        pthread_cond_wait(&nThreadsCondvar, &nThreadsMutex);
+    }
+    pthread_mutex_unlock(&nThreadsMutex);
+
+    pthread_mutex_lock(&thisBalcao->clientLookMutex);
+    thisBalcao->aberto = 0;
+    pthread_mutex_unlock(&thisBalcao->clientLookMutex);
+
+    pthread_mutex_lock(&sharedMemory->nBalcoesMutex);
+    size_t nBalcoes = sharedMemory->nBalcoes;
+
+    int cleanAndGenerateStatistics = 1;
+    for (size_t i = 0; i < nBalcoes; ++i) {
+        pthread_mutex_lock(&sharedMemory->infoBalcoes[i].clientLookMutex);
+        if (sharedMemory->infoBalcoes[i].aberto) {
+            cleanAndGenerateStatistics = 0;
+            break;
+        }
+        pthread_mutex_unlock(&sharedMemory->infoBalcoes[i].clientLookMutex);
+    }
+
+    if (!cleanAndGenerateStatistics) EXIT_SUCCESS;
+    if (generateStatistics() != 0) {
+        fprintf(stderr, "Failure in generateStatistics\n");
+        EXIT_FAILURE;
+    }
+
+    pthread_mutex_unlock(&sharedMemory->nBalcoesMutex);
 
 cleanUp:
 
@@ -330,6 +357,7 @@ SharedMemory_t* createSharedMemory(void) {
 
     // Initialize data
     shm->nBalcoes = 0;
+    shm->tempoAbertura = time(NULL);
 
     // Initialize the nBalcoes mutex and condvar
     pthread_mutexattr_t mattr;
@@ -469,11 +497,11 @@ int createBalcao(void) {
     }
 
     Info_t *ptrBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
-    ptrBalcao->tempoAbertura = tempoAbertura;
     ptrBalcao->sumatorioTempoAtendimentoClientes = 0;
     ptrBalcao->nClientesAtendidos = 0;
-    ptrBalcao->fifoCircularIndex = 0;
-    ptrBalcao->fifoSlots = MAXCLIENTES;
+    ptrBalcao->nClientesEmAtendimento = 0;
+    ptrBalcao->aberto = 1;
+    ptrBalcao->tempoInicioFuncionamento = time(NULL);
 
     // Initialize the mutexes and condvars
     pthread_mutexattr_t mattr;
@@ -482,17 +510,15 @@ int createBalcao(void) {
 
     pthread_mutex_init(&ptrBalcao->namedPipeMutex, &mattr);
     pthread_mutex_init(&ptrBalcao->clientContribMutex, &mattr);
-    pthread_mutex_init(&ptrBalcao->fifoMutex, &mattr);
-    pthread_mutex_init(&ptrBalcao->fifoSlotsMutex, &mattr);
+    pthread_mutex_init(&ptrBalcao->clientLookMutex, &mattr);
 
     pthread_condattr_t cattr;
     pthread_condattr_init(&cattr);
-    pthread_condattr_setpshared(&cattr,PTHREAD_PROCESS_SHARED);
+    pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
 
     pthread_cond_init(&ptrBalcao->namedPipeCondvar, &cattr);
     pthread_cond_init(&ptrBalcao->clientContribCondvar, &cattr);
-    pthread_cond_init(&ptrBalcao->fifoCondvar, &cattr);
-    pthread_cond_init(&ptrBalcao->fifoSlotsCondvar, &cattr);
+    pthread_cond_init(&ptrBalcao->clientLookCondvar, &cattr);
 
     snprintf(ptrBalcao->namedPipeName, NAMEDPIPESIZE, "fb%lu_%d", numeroBalcao, getpid());
     if (mkfifo(ptrBalcao->namedPipeName, 0660) != 0) {
@@ -522,10 +548,83 @@ int createBalcao(void) {
     return 0;
 }
 
-void childHandler(__attribute__((unused)) int signo) {
+void alarmHandler(__attribute__((unused)) int signo) {
 
+    pthread_mutex_lock(&nThreadsMutex);
     bailOutOnNextClient = 1;
+    pthread_mutex_unlock(&nThreadsMutex);
 
     Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
     pthread_cond_broadcast(&thisBalcao->namedPipeCondvar);
+}
+
+void *answerCall(void *arg) {
+
+    if (arg == NULL) {
+        errno = EINVAL;
+        perror("answerCall wrong arguments");
+    }
+
+    Info_t *balcao = &sharedMemory->infoBalcoes[numeroBalcao];
+    pthread_mutex_lock(&balcao->clientLookMutex);
+    ++balcao->nClientesEmAtendimento;
+    size_t nClientesEmAtendimento = balcao->nClientesEmAtendimento;
+    pthread_mutex_unlock(&balcao->clientLookMutex);
+
+    pthread_mutex_lock(&nThreadsMutex);
+    ++nThreads;
+    if (bailOutOnNextClient) {
+        free(arg);
+        --nThreads;
+        return NULL;
+    }
+    pthread_mutex_unlock(&nThreadsMutex);
+
+    pthread_mutex_lock(&answerThreadWorkingMutex);
+
+    char *clientNamedPipe = (char *) arg;
+
+    int clientNamedPipeFd = open(clientNamedPipe, O_WRONLY);
+    if (clientNamedPipeFd == -1) {
+        perror("Failure in open()\n");
+    }
+
+    size_t sleepSeconds;
+    if (nClientesEmAtendimento > 10) {
+        sleepSeconds = 10;
+    } else {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        srand((unsigned int) (tv.tv_sec * tv.tv_usec));
+        sleepSeconds = (unsigned int) (rand() % 10 + 1);
+    }
+    // Sleep x time
+    sleep((unsigned int) (sleepSeconds));
+
+    pthread_mutex_lock(&balcao->clientLookMutex);
+    --balcao->nClientesEmAtendimento;
+    pthread_mutex_unlock(&balcao->clientLookMutex);
+
+    pthread_mutex_lock(&balcao->clientContribMutex);
+    ++balcao->nClientesAtendidos;
+    balcao->sumatorioTempoAtendimentoClientes += sleepSeconds;
+    pthread_mutex_unlock(&balcao->clientContribMutex);
+
+    if (write(clientNamedPipeFd, "fim_atendimento", sizeof("fim_atendimento")) == -1) {
+        perror("Failure in read()");
+    }
+
+    pthread_mutex_unlock(&answerThreadWorkingMutex);
+
+    pthread_mutex_lock(&nThreadsMutex);
+    --nThreads;
+    pthread_cond_signal(&nThreadsCondvar);
+    pthread_mutex_unlock(&nThreadsMutex);
+
+    free(clientNamedPipe);
+    return NULL;
+}
+
+int generateStatistics(void) {
+
 }
