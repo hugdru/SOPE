@@ -191,25 +191,32 @@ int main(int argc, char *argv[]) {
                         goto cleanUpChild;
                     }
 
-                    if (pthread_cond_signal(&chosenBalcao->namedPipeCondvar) != 0) {
-                        fprintf(stderr, "Failure in pthread_cond_signal\n");
+                    if (pthread_cond_broadcast(&chosenBalcao->namedPipeCondvar) != 0) {
+                        fprintf(stderr, "Failure in pthread_cond_signal()\n");
                         goto cleanUpChild;
                     }
 
-                    if (pthread_mutex_unlock(&sharedMemory->infoBalcoes[indexMinSlots].namedPipeMutex) != 0) {
-                        fprintf(stderr, "Failure in pthread_mutex_unlock\n");
+                    if (pthread_mutex_unlock(&chosenBalcao->namedPipeMutex) != 0) {
+                        fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
                         goto cleanUpChild;
                     }
 
                     // Wait for the return message so that we can close our clientNamedPipe
-                    //
-                    //
-                    //
-                    //
-                    //
-                    //
-                    //
+                    // The open is blocked until something is opened for writing
+                    int clientFifoFd = open(clientNamedPipeName, O_RDONLY);
+                    if (clientFifoFd == -1) {
+                        perror("Failure in open()\n");
+                        goto cleanUpChild;
+                    }
 
+                    char mensagem[64];
+                    ssize_t bytesRead;
+                    if ((bytesRead = read(clientFifoFd, mensagem, 64)) == -1) {
+                        perror("Failure in read()");
+                        goto cleanUpChild;
+                    }
+                    mensagem[bytesRead - 1] = '\0';
+                    puts(mensagem);
 
                     exit(EXIT_SUCCESS);
 cleanUpChild:

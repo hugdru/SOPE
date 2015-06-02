@@ -156,7 +156,7 @@ int main(int argc, char *argv[]) {
     int ptrLastSeparatorIndex = 0;
     Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
 
-    int t = 0;
+    size_t t = 0;
     while (t < 3) {
 
         if (pthread_mutex_lock(&thisBalcao->namedPipeMutex) != 0) {
@@ -174,11 +174,6 @@ int main(int argc, char *argv[]) {
             goto cleanUp;
         }
 
-        if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
-            fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
-            goto cleanUp;
-        }
-
         int i = intelFilledSize;
         ptrStartTokenIndex = 0;
         while (i < intelReadSize) {
@@ -188,6 +183,17 @@ int main(int argc, char *argv[]) {
                 //
                 //
                 //
+                // Temporary stuff for testing
+                int clientNamedPipeFd = open(&intel[ptrStartTokenIndex], O_WRONLY);
+                if (clientNamedPipeFd == -1) {
+                    perror("Failure in open()\n");
+                    goto cleanUp;
+                }
+
+                if (write(clientNamedPipeFd, "fim_atendimento", sizeof("fim_atendimento")) == -1) {
+                    perror("Failure in read()");
+                    goto cleanUp;
+                }
                 //
                 //
                 //
@@ -197,6 +203,11 @@ int main(int argc, char *argv[]) {
             ++i;
         }
 
+        if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
+            fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
+            goto cleanUp;
+        }
+
         if (ptrStartTokenIndex != intelReadSize) {
             intelFilledSize = 255 - ptrLastSeparatorIndex;
             if (memcpy(intel, intel + ptrStartTokenIndex, (size_t) intelFilledSize) == NULL) {
@@ -204,6 +215,8 @@ int main(int argc, char *argv[]) {
                 goto cleanUp;
             }
         }
+
+        printf("%lu\n", t);
         ++t;
     }
 
