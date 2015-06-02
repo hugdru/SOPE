@@ -29,7 +29,6 @@ typedef struct Info {
     /** Client Contributions **/
     size_t sumatorioTempoAtendimentoClientes;
     size_t nClientesAtendidos;
-    size_t tempoAbertura;
     pthread_mutex_t clientContribMutex;
     pthread_cond_t clientContribCondvar;
     /** End of Client Contributions **/
@@ -44,10 +43,12 @@ typedef struct Info {
     pthread_mutex_t fifoSlotsMutex;
     pthread_cond_t fifoSlotsCondvar;
     /** End of Slots Available in Fifo **/
+    size_t tempoAbertura;
 } Info_t;
 
 typedef struct SharedMemory {
     Info_t infoBalcoes[MAXBALCOES];
+    size_t tempoAbertura;
     size_t nBalcoes;
     pthread_mutex_t nBalcoesMutex;
     pthread_cond_t nBalcoesCondvar;
@@ -88,13 +89,17 @@ int main(int argc, char *argv[]) {
     // Add the / prefix to the parameter received
     size_t shmNameSize = (strlen(argv[1]) + 1) * sizeof(argv[1][0]) + 1;
     shmName = (char *) malloc(shmNameSize);
+    if (shmName == NULL) {
+        perror("Failure in malloc");
+        exit(EXIT_FAILURE);
+    }
     snprintf(shmName, shmNameSize, "%s%s", "/", argv[1]);
 
     // Convert from string to unsigned long
     errno = 0;
     tempoAbertura = strtoul(argv[2], NULL, 10);
     if (errno != 0) {
-        fprintf(stderr, "Failure in strtoul()\n");
+        perror("Failure in strtoul()");
         free(shmName);
         exit(EXIT_FAILURE);
     }
@@ -181,7 +186,12 @@ int main(int argc, char *argv[]) {
                 // Call a answering thread
                 //
                 //
+                //
+                //
+                //
+                //
                 write(STDOUT_FILENO, &intel[ptrStartTokenIndex], (size_t) (ptrLastSeparatorIndex - ptrStartTokenIndex));
+                sleep(1);
                 if (i != 255) ptrStartTokenIndex = i + 1;
             }
             ++i;
