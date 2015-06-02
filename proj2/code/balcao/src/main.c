@@ -236,14 +236,23 @@ int main(int argc, char *argv[]) {
         if (bailOutOnNextClient) break;
     }
 
-cleanUp:
-
     if (namedPipeFd != -1) {
         if (close(namedPipeFd) == -1) {
             perror("Failure in close()");
-            failed = 1;
+        }
+
+        if (unlink(thisBalcao->namedPipeName) == -1) {
+            perror("Failure in unlink()");
         }
     }
+
+    // Check if its is the last one and if it is generate statistics and then clean everything
+    //
+    //
+    //
+    //
+
+cleanUp:
 
     if (destroySharedMemory() != 0) {
         fprintf(stderr, "Failure in destroySharedMemory()\n");
@@ -413,7 +422,6 @@ int createFolder(void) {
 
     if (mkdir(tempFilePathDir, 0770) == -1) {
         perror("Failed to create temp file folder");
-        return -1;
     }
 
     return 0;

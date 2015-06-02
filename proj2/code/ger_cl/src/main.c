@@ -229,6 +229,14 @@ int main(int argc, char *argv[]) {
                     mensagem[bytesRead - 1] = '\0';
                     puts(mensagem);
 
+                    if (close(clientFifoFd) == -1) {
+                        perror("Failure in close()");
+                    }
+
+                    if (unlink(clientNamedPipeName) == -1) {
+                        perror("Failure in unlink()");
+                    }
+
                     free(shmName);
                     exit(EXIT_SUCCESS);
 cleanUpChild:
