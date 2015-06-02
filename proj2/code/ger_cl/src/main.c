@@ -59,6 +59,7 @@ typedef struct SharedMemory {
 
 SharedMemory_t* openSharedMemory(char *shmName);
 void childHandler(__attribute__((unused)) int signo);
+void pipeHandler(__attribute__((unused)) int signo);
 
 const char tempFilePathDir[] = "/tmp/sope";
 
@@ -76,7 +77,8 @@ int main(int argc, char *argv[]) {
     size_t shmNameSize = (strlen(argv[1]) + 1) * sizeof(argv[1][0]) + 1;
     char *shmName = (char *) malloc(shmNameSize);
     if (shmName == NULL) {
-
+        perror("Failure in malloc()");
+        exit(EXIT_FAILURE);
     }
     snprintf(shmName, shmNameSize, "%s%s", "/", argv[1]);
 
@@ -102,12 +104,12 @@ int main(int argc, char *argv[]) {
     }
 
     /** INSTALL SIGCHLD HANDLER **/
-    struct sigaction sigact;
-    sigact.sa_handler = childHandler;
-    sigemptyset(&sigact.sa_mask);
+    struct sigaction sigactChild;
+    sigactChild.sa_handler = childHandler;
+    sigemptyset(&sigactChild.sa_mask);
     // Do not receive job control notification from child
-    sigact.sa_flags = SA_NOCLDSTOP;
-    if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
+    sigactChild.sa_flags = SA_NOCLDSTOP;
+    if (sigaction(SIGCHLD, &sigactChild, NULL) == -1) {
         perror("There was an error installing the SIGCHLD handler");
         goto cleanUp;
     }
@@ -124,6 +126,15 @@ int main(int argc, char *argv[]) {
         switch (newClientePid) {
             case 0:
                 {
+                    /** INSTALL SIGPIPE HANDLER **/
+                    struct sigaction sigactPipe;
+                    sigactPipe.sa_handler = pipeHandler;
+                    sigemptyset(&sigactPipe.sa_mask);
+                    if (sigaction(SIGPIPE, &sigactPipe, NULL) == -1) {
+                        perror("There was an error installing the SIGPIPE handler");
+                        exit(EXIT_FAILURE);
+                    }
+
                     size_t clientNamedPipeSize = 3 + 7 + 1;
                     char *clientNamedPipeName = (char *) malloc(clientNamedPipeSize);
                     if (clientNamedPipeName == NULL) {
@@ -218,19 +229,21 @@ int main(int argc, char *argv[]) {
                     mensagem[bytesRead - 1] = '\0';
                     puts(mensagem);
 
+                    free(shmName);
                     exit(EXIT_SUCCESS);
 cleanUpChild:
                     if (clientNamedPipeName != NULL) free(clientNamedPipeName);
+                    if (shmName != NULL) free(shmName);
                     exit(EXIT_FAILURE);
                 }
         }
     }
 
     // Uninstall the child handler
-    sigemptyset(&sigact.sa_mask);
-    sigact.sa_handler = SIG_DFL;
-    sigact.sa_flags = 0;
-    if (sigaction(SIGCHLD, &sigact, NULL) == -1) {
+    sigemptyset(&sigactChild.sa_mask);
+    sigactChild.sa_handler = SIG_DFL;
+    sigactChild.sa_flags = 0;
+    if (sigaction(SIGCHLD, &sigactChild, NULL) == -1) {
         perror("There was an error setting the default SIGCHLD handler");
         goto cleanUp;
     }
@@ -307,4 +320,9 @@ void childHandler(__attribute__((unused)) int signo) {
             exit(EXIT_FAILURE);
         }
     }
+}
+
+void pipeHandler(__attribute__((unused)) int signo) {
+    fprintf(stderr, "Balcao was closed\n");
+    exit(EXIT_FAILURE);
 }

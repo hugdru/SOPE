@@ -237,10 +237,19 @@ int main(int argc, char *argv[]) {
     }
 
 cleanUp:
+
+    if (namedPipeFd != -1) {
+        if (close(namedPipeFd) == -1) {
+            perror("Failure in close()");
+            failed = 1;
+        }
+    }
+
     if (destroySharedMemory() != 0) {
         fprintf(stderr, "Failure in destroySharedMemory()\n");
         failed = 1;
     }
+
     if (destroyGlobalSemaphore() != 0) {
         fprintf(stderr, "Failure in destroyGlobalSemaphore()\n");
         failed = 1;
