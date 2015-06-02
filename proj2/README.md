@@ -2,6 +2,8 @@ Compilation instructions:
     In the code directory there is a makefile which calls
     each of the 2 programs makefiles
 
+    O argumento corresponde à memória partilhada não leva slash
+
     code/makefile--------------|
         code/balcao/makefile---|
         code/ger_cl/makefile---|
