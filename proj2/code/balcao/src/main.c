@@ -179,6 +179,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Failure in pthread_cond_wait()\n");
             goto cleanUp;
         }
+        if (bailOutOnNextClient) break;
 
         if ((intelReadSize = read(namedPipeFd, intel + intelFilledSize, (size_t) (256 - intelFilledSize))) == -1) {
             perror("Failure in read");
@@ -215,6 +216,11 @@ int main(int argc, char *argv[]) {
                 ++i;
             }
 
+            if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
+                fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
+                goto cleanUp;
+            }
+
             if (ptrStartTokenIndex != intelReadSize) {
                 intelFilledSize = 255 - ptrLastSeparatorIndex;
                 if (memcpy(intel, intel + ptrStartTokenIndex, (size_t) intelFilledSize) == NULL) {
@@ -222,11 +228,6 @@ int main(int argc, char *argv[]) {
                     goto cleanUp;
                 }
             }
-        }
-
-        if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
-            fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
-            goto cleanUp;
         }
 
         if (bailOutOnNextClient) break;
@@ -506,7 +507,5 @@ void childHandler(__attribute__((unused)) int signo) {
     bailOutOnNextClient = 1;
 
     Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
-    pthread_mutex_lock(&thisBalcao->namedPipeMutex);
     pthread_cond_broadcast(&thisBalcao->namedPipeCondvar);
-    pthread_mutex_unlock(&thisBalcao->namedPipeMutex);
 }
