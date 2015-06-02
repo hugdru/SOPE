@@ -13,14 +13,16 @@
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 #define MAXBALCOES 32
 #define MAXCLIENTES 128
+#define NAMEDPIPESIZE (2 + 2 + 1 + 7 + 1)
 
 /** Estruturas que serão partilhadas **/
 typedef struct Info {
     /** namedPipe and Misc**/
-    int namedPipeFd;
+    char namedPipeName[NAMEDPIPESIZE];
     pthread_mutex_t namedPipeMutex;
     pthread_cond_t namedPipeCondvar;
     /** End of namedPipe **/
@@ -53,6 +55,7 @@ typedef struct SharedMemory {
 /** Fim de Estrutas que serão partilhadas **/
 
 /** Stuff to put in structure or that can be access globally **/
+int namedPipeFd = -1;
 char *semName = NULL;
 char *shmName = NULL;
 size_t numeroBalcao;
@@ -61,7 +64,7 @@ SharedMemory_t *sharedMemory = NULL;
 sem_t *globalShemaphore = NULL;
 /** Fim de Stuff to put in structure or that can be access globally **/
 
-char tempFilePathDir[] = "/tmp/sope";
+const char tempFilePathDir[] = "/tmp/sope";
 
 sem_t* getGlobalSemaphore(void);
 int destroyGlobalSemaphore(void);
@@ -91,7 +94,7 @@ int main(int argc, char *argv[]) {
     errno = 0;
     tempoAbertura = strtoul(argv[2], NULL, 10);
     if (errno != 0) {
-        fprintf(stderr, "Failure in strtoul()");
+        fprintf(stderr, "Failure in strtoul()\n");
         free(shmName);
         exit(EXIT_FAILURE);
     }
@@ -137,18 +140,74 @@ int main(int argc, char *argv[]) {
         goto cleanUp;
     }
 
+    // Install the alarm stuff
+
+
+    // Wait for clents and act accordingly
+    char intel[256];
+    int intelFilledSize = 0;
+    ssize_t intelReadSize;
+    int ptrStartTokenIndex = 0;
+    int ptrLastSeparatorIndex = 0;
+    Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
+
+    while (1) {
+
+        if (pthread_mutex_lock(&thisBalcao->namedPipeMutex) != 0) {
+            fprintf(stderr, "Failure in pthread_mutex_lock()\n");
+            goto cleanUp;
+        }
+
+        if (pthread_cond_wait(&thisBalcao->namedPipeCondvar, &thisBalcao->namedPipeMutex) != 0) {
+            fprintf(stderr, "Failure in pthread_cond_wait()\n");
+            goto cleanUp;
+        }
+
+        if ((intelReadSize = read(namedPipeFd, intel + intelFilledSize, (size_t) (256 - intelFilledSize))) == -1) {
+            perror("Failure in read");
+            goto cleanUp;
+        }
+
+        if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
+            fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
+            goto cleanUp;
+        }
+
+        int i = 0;
+        ptrStartTokenIndex = 0;
+        while (i < intelReadSize) {
+            if (intel[i] == '\0') {
+                ptrLastSeparatorIndex = i;
+                // Call a answering thread
+                //
+                //
+                write(STDOUT_FILENO, &intel[ptrStartTokenIndex], (size_t) (ptrLastSeparatorIndex - ptrStartTokenIndex));
+                if (i != 255) ptrStartTokenIndex = i + 1;
+            }
+            ++i;
+        }
+
+        if (ptrStartTokenIndex != 256) {
+            intelFilledSize = 255 - ptrLastSeparatorIndex;
+            if (memcpy(intel, intel + ptrStartTokenIndex, (size_t) intelFilledSize) == NULL) {
+                perror("Failure in memcpy");
+                goto cleanUp;
+            }
+        }
+    }
+
 cleanUp:
     if (destroySharedMemory() != 0) {
-        fprintf(stderr, "Failure in destroySharedMemory()");
+        fprintf(stderr, "Failure in destroySharedMemory()\n");
         failed = 1;
     }
     if (destroyGlobalSemaphore() != 0) {
-        fprintf(stderr, "Failure in destroyGlobalSemaphore()");
+        fprintf(stderr, "Failure in destroyGlobalSemaphore()\n");
         failed = 1;
     }
 
     if (removeTempDir() != 0) {
-        fprintf(stderr, "Failure in removeTempDir()");
+        fprintf(stderr, "Failure in removeTempDir()\n");
         failed = 1;
     }
 
@@ -341,13 +400,13 @@ int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, 
 int createBalcao(void) {
 
     if (pthread_mutex_lock(&sharedMemory->nBalcoesMutex) != 0) {
-        fprintf(stderr, "Failure in pthread_mutex_lock()");
+        fprintf(stderr, "Failure in pthread_mutex_lock()\n");
         return -1;
     }
 
     while ((numeroBalcao = sharedMemory->nBalcoes) >= MAXBALCOES) {
         if (pthread_cond_wait(&sharedMemory->nBalcoesCondvar, &sharedMemory->nBalcoesMutex) != 0) {
-            fprintf(stderr, "Failure in pthread_cond_wait()");
+            fprintf(stderr, "Failure in pthread_cond_wait()\n");
             return -1;
         }
     }
@@ -378,29 +437,27 @@ int createBalcao(void) {
     pthread_cond_init(&ptrBalcao->fifoCondvar, &cattr);
     pthread_cond_init(&ptrBalcao->fifoSlotsCondvar, &cattr);
 
-    size_t fifoNameSize = 2 + 2 + 1 + 7 + 1;
-    char fifoName[fifoNameSize];
-    snprintf(fifoName, fifoNameSize, "fb%lu_%d", numeroBalcao, getpid());
-    if (mkfifo(fifoName, 0660) != 0) {
+    snprintf(ptrBalcao->namedPipeName, NAMEDPIPESIZE, "fb%lu_%d", numeroBalcao, getpid());
+    if (mkfifo(ptrBalcao->namedPipeName, 0660) != 0) {
         perror("Failure in mkfifo()");
         return -1;
     }
 
-    int fifoFd = open(fifoName, O_RDONLY | O_NONBLOCK);
+    int fifoFd = open(ptrBalcao->namedPipeName, O_RDONLY | O_NONBLOCK);
     if (fifoFd == -1) {
         perror("Failure in open()");
         return -1;
     }
-    ptrBalcao->namedPipeFd = fifoFd;
+    namedPipeFd = fifoFd;
 
     ++sharedMemory->nBalcoes;
 
     if (pthread_mutex_unlock(&sharedMemory->nBalcoesMutex) != 0) {
-        fprintf(stderr, "Failure in pthread_mutex_unlock()");
+        fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
         return -1;
     }
     if (pthread_cond_broadcast(&sharedMemory->nBalcoesCondvar) != 0) {
-        fprintf(stderr, "Failure in pthread_cond_broadcast()");
+        fprintf(stderr, "Failure in pthread_cond_broadcast()\n");
         return -1;
     }
 
