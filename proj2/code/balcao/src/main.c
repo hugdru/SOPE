@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <signal.h>
 
 #define MAXBALCOES 32
 #define MAXCLIENTES 128
@@ -63,6 +64,7 @@ size_t numeroBalcao;
 size_t tempoAbertura;
 SharedMemory_t *sharedMemory = NULL;
 sem_t *globalShemaphore = NULL;
+int bailOutOnNextClient = 0;
 /** Fim de Stuff to put in structure or that can be access globally **/
 
 const char tempFilePathDir[] = "/tmp/sope";
@@ -76,6 +78,7 @@ int createFolder(void);
 int removeTempDir(void);
 int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, int typeflag);
 int createBalcao(void);
+void childHandler(__attribute__((unused)) int signo);
 
 int main(int argc, char *argv[]) {
 
@@ -146,7 +149,14 @@ int main(int argc, char *argv[]) {
     }
 
     // Install the alarm stuff
-
+    struct sigaction sigact;
+    sigact.sa_handler = childHandler;
+    sigemptyset(&sigact.sa_mask);
+    // Do not receive job control notification from child
+    if (sigaction(SIGALRM, &sigact, NULL) == -1) {
+        perror("There was an error installing the SIGALRM handler");
+        goto cleanUp;
+    }
 
     // Wait for clents and act accordingly
     char intel[256];
@@ -156,9 +166,10 @@ int main(int argc, char *argv[]) {
     int ptrLastSeparatorIndex = 0;
     Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
 
-    size_t t = 0;
-    while (t < 3) {
+    // Start alarm
+    alarm(tempoAbertura);
 
+    while (1) {
         if (pthread_mutex_lock(&thisBalcao->namedPipeMutex) != 0) {
             fprintf(stderr, "Failure in pthread_mutex_lock()\n");
             goto cleanUp;
@@ -174,33 +185,43 @@ int main(int argc, char *argv[]) {
             goto cleanUp;
         }
 
-        int i = intelFilledSize;
-        ptrStartTokenIndex = 0;
-        while (i < intelReadSize) {
-            if (intel[i + intelFilledSize] == '\0') {
-                ptrLastSeparatorIndex = i;
-                // Call a answering thread
-                //
-                //
-                //
-                // Temporary stuff for testing
-                int clientNamedPipeFd = open(&intel[ptrStartTokenIndex], O_WRONLY);
-                if (clientNamedPipeFd == -1) {
-                    perror("Failure in open()\n");
-                    goto cleanUp;
-                }
+        if (intelReadSize != 0) {
+            int i = intelFilledSize;
+            ptrStartTokenIndex = 0;
+            while (i < intelReadSize) {
+                if (intel[i + intelFilledSize] == '\0') {
+                    ptrLastSeparatorIndex = i;
+                    // Call a answering thread
+                    //
+                    //
+                    //
+                    // Temporary stuff for testing
+                    int clientNamedPipeFd = open(&intel[ptrStartTokenIndex], O_WRONLY);
+                    if (clientNamedPipeFd == -1) {
+                        perror("Failure in open()\n");
+                        goto cleanUp;
+                    }
 
-                if (write(clientNamedPipeFd, "fim_atendimento", sizeof("fim_atendimento")) == -1) {
-                    perror("Failure in read()");
+                    if (write(clientNamedPipeFd, "fim_atendimento", sizeof("fim_atendimento")) == -1) {
+                        perror("Failure in read()");
+                        goto cleanUp;
+                    }
+                    //
+                    //
+                    //
+                    puts(&intel[ptrStartTokenIndex]);
+                    ptrStartTokenIndex = i + 1;
+                }
+                ++i;
+            }
+
+            if (ptrStartTokenIndex != intelReadSize) {
+                intelFilledSize = 255 - ptrLastSeparatorIndex;
+                if (memcpy(intel, intel + ptrStartTokenIndex, (size_t) intelFilledSize) == NULL) {
+                    perror("Failure in memcpy");
                     goto cleanUp;
                 }
-                //
-                //
-                //
-                puts(&intel[ptrStartTokenIndex]);
-                ptrStartTokenIndex = i + 1;
             }
-            ++i;
         }
 
         if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
@@ -208,16 +229,7 @@ int main(int argc, char *argv[]) {
             goto cleanUp;
         }
 
-        if (ptrStartTokenIndex != intelReadSize) {
-            intelFilledSize = 255 - ptrLastSeparatorIndex;
-            if (memcpy(intel, intel + ptrStartTokenIndex, (size_t) intelFilledSize) == NULL) {
-                perror("Failure in memcpy");
-                goto cleanUp;
-            }
-        }
-
-        printf("%lu\n", t);
-        ++t;
+        if (bailOutOnNextClient) break;
     }
 
 cleanUp:
@@ -489,3 +501,12 @@ int createBalcao(void) {
     return 0;
 }
 
+void childHandler(__attribute__((unused)) int signo) {
+
+    bailOutOnNextClient = 1;
+
+    Info_t *thisBalcao = &sharedMemory->infoBalcoes[numeroBalcao];
+    pthread_mutex_lock(&thisBalcao->namedPipeMutex);
+    pthread_cond_broadcast(&thisBalcao->namedPipeCondvar);
+    pthread_mutex_unlock(&thisBalcao->namedPipeMutex);
+}
