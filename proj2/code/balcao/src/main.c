@@ -186,11 +186,20 @@ int main(int argc, char *argv[]) {
             goto cleanUp;
         }
 
+        if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
+            fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
+            goto cleanUp;
+        }
+
         if (intelReadSize != 0) {
             int i = intelFilledSize;
             ptrStartTokenIndex = 0;
             while (i < intelReadSize) {
                 if (intel[i + intelFilledSize] == '\0') {
+
+                    write(STDOUT_FILENO, "MERDA\n", sizeof("MERDA\n"));
+                    puts("MERDA\n");
+
                     ptrLastSeparatorIndex = i;
                     // Call a answering thread
                     //
@@ -210,15 +219,9 @@ int main(int argc, char *argv[]) {
                     //
                     //
                     //
-                    puts(&intel[ptrStartTokenIndex]);
                     ptrStartTokenIndex = i + 1;
                 }
                 ++i;
-            }
-
-            if (pthread_mutex_unlock(&thisBalcao->namedPipeMutex) != 0) {
-                fprintf(stderr, "Failure in pthread_mutex_unlock()\n");
-                goto cleanUp;
             }
 
             if (ptrStartTokenIndex != intelReadSize) {

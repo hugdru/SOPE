@@ -186,7 +186,7 @@ int main(int argc, char *argv[]) {
                         goto cleanUpChild;
                     }
 
-                    if (write(fifoFd, clientNamedPipeName, sizeof(clientNamedPipeName)) == -1) {
+                    if (write(fifoFd, clientNamedPipeName, strlen(clientNamedPipeName) + 1) == -1) {
                         perror("Failure in write()");
                         goto cleanUpChild;
                     }
