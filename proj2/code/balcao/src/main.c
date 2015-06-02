@@ -51,16 +51,19 @@ typedef struct SharedMemory {
 } SharedMemory_t;
 /** Fim de Estrutas que serão partilhadas **/
 
+/** Stuff to put in structure or that can be access globally **/
 char *semName = NULL;
 char *shmName = NULL;
-size_t numeroBalcao = -1;
-size_t tempoAbertura = -1;
+size_t numeroBalcao;
+size_t tempoAbertura;
 SharedMemory_t *sharedMemory = NULL;
+sem_t *globalShemaphore = NULL;
+/** Fim de Stuff to put in structure or that can be access globally **/
 
 sem_t* getGlobalSemaphore(void);
-int destroyGlobalSemaphore(sem_t *sem);
+int destroyGlobalSemaphore(void);
 SharedMemory_t* createSharedMemory(void);
-int destroySharedMemory(SharedMemory_t *shm);
+int destroySharedMemory(void);
 SharedMemory_t* openSharedMemory(void);
 int createFolder(void);
 int removeTempDir(void);
@@ -93,10 +96,10 @@ int main(int argc, char *argv[]) {
     }
 
     // Open or create the semaphore initialize with 1
-    sem_t *globalShemaphore = getGlobalSemaphore();
+    globalShemaphore = getGlobalSemaphore();
     if (globalShemaphore == NULL) {
         fprintf(stderr, "Failure in globalShemaphore()\n");
-        exit(EXIT_FAILURE);
+        free(shmName);
     }
 
     // Attempt to get permission to create a semaphore
@@ -129,20 +132,25 @@ int main(int argc, char *argv[]) {
 
     // Do this balcao stuff
     if (createBalcao() != 0) {
-        perror("Failure in createNewBalcao()");
+        perror("Failure in createBalcao()");
         goto cleanUp;
     }
 
-
 cleanUp:
-    if (destroySharedMemory(sharedMemory) != 0) {
+    if (destroySharedMemory() != 0) {
         fprintf(stderr, "Failure in destroySharedMemory()");
         failed = 1;
     }
-    if (destroyGlobalSemaphore(globalShemaphore) != 0) {
+    if (destroyGlobalSemaphore() != 0) {
         fprintf(stderr, "Failure in destroyGlobalSemaphore()");
         failed = 1;
     }
+
+    if (removeTempDir() != 0) {
+        fprintf(stderr, "Failure in removeTempDir()");
+        failed = 1;
+    }
+
     if (failed) EXIT_FAILURE;
     else EXIT_SUCCESS;
 }
@@ -222,15 +230,15 @@ SharedMemory_t* createSharedMemory(void) {
 }
 
 
-int destroySharedMemory(SharedMemory_t *shm) {
+int destroySharedMemory(void) {
 
-    if (shmName == NULL || shmName == NULL) {
+    if (sharedMemory == NULL || shmName == NULL) {
         errno = EINVAL;
         perror("Failure in destroySharedMemory");
         return -1;
     }
 
-    if (munmap(shm, sizeof(SharedMemory_t)) < 0) {
+    if (munmap(sharedMemory, sizeof(SharedMemory_t)) < 0) {
         perror("Failure in munmap()");
         free(shmName);
         return -1;
@@ -271,15 +279,15 @@ sem_t* getGlobalSemaphore(void) {
 }
 
 
-int destroyGlobalSemaphore(sem_t *sem) {
-    if (sem == NULL) {
+int destroyGlobalSemaphore(void) {
+    if (globalShemaphore == NULL) {
         errno = EINVAL;
         perror("Failure in createGlobalSemaphore");
         return -1;
     }
 
     int failed = 0;
-    if (sem_close(sem) != 0) {
+    if (sem_close(globalShemaphore) != 0) {
         perror("Failure in sem_close()");
         failed = 1;
     }
@@ -332,9 +340,17 @@ int ftwHandler(const char *fpath,__attribute__((unused)) const struct stat *sb, 
 
 int createBalcao(void) {
 
-    pthread_mutex_lock(&sharedMemory->nBalcoesMutex);
-    while (sharedMemory->nBalcoes >= MAXBALCOES)
-        pthread_cond_wait(&sharedMemory->nBalcoesCondvar, &sharedMemory->nBalcoesMutex);
+    if (pthread_mutex_lock(&sharedMemory->nBalcoesMutex) != 0) {
+        fprintf(stderr, "Failure in pthread_mutex_lock()");
+        return -1;
+    }
+
+    while (sharedMemory->nBalcoes >= MAXBALCOES) {
+        if (pthread_cond_wait(&sharedMemory->nBalcoesCondvar, &sharedMemory->nBalcoesMutex) != 0) {
+            fprintf(stderr, "Failure in pthread_cond_wait()");
+            return -1;
+        }
+    }
 
     Info_t *ptrBalcao = &sharedMemory->infoBalcoes[sharedMemory->nBalcoes];
     ptrBalcao->tempoAbertura = tempoAbertura;
@@ -364,20 +380,28 @@ int createBalcao(void) {
 
     char fifoName[4];
     snprintf(fifoName, 4, "%s%lu", "b", sharedMemory->nBalcoes);
-    if (mkfifo("b", 0660) != 0) {
+    if (mkfifo(fifoName, 0660) != 0) {
+        perror("Failure in mkfifo()");
         return -1;
     }
 
-    int fifoFd = open(fifoName, O_RDONLY);
+    int fifoFd = open(fifoName, O_RDONLY | O_NONBLOCK);
     if (fifoFd == -1) {
+        perror("Failure in open()");
         return -1;
     }
     ptrBalcao->namedPipeFd = fifoFd;
 
     ++sharedMemory->nBalcoes;
 
-    pthread_mutex_unlock(&sharedMemory->nBalcoesMutex);
-    pthread_cond_broadcast(&sharedMemory->nBalcoesCondvar);
+    if (pthread_mutex_unlock(&sharedMemory->nBalcoesMutex) != 0) {
+        fprintf(stderr, "Failure in pthread_mutex_unlock()");
+        return -1;
+    }
+    if (pthread_cond_broadcast(&sharedMemory->nBalcoesCondvar) != 0) {
+        fprintf(stderr, "Failure in pthread_cond_broadcast()");
+        return -1;
+    }
 
     return 0;
 }
