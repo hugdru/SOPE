@@ -1,3 +1,0 @@
-if [ -d bin ]; then
-    export PATH="$PATH:$(pwd)/bin"
-fi
